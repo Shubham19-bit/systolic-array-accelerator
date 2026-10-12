@@ -67,7 +67,7 @@ async def test_extreme_values(dut):
 
 @cocotb.test()
 async def test_random_back_to_back(dut):
-    """50 random jobs back to back, no stalls; also checks latency = K + 3N."""
+    """50 random jobs back to back, no stalls; also checks latency = K + DRAIN + N."""
     await start_clock_and_reset(dut)
     rng = np.random.default_rng(2)
     perf = []
@@ -78,13 +78,15 @@ async def test_random_back_to_back(dut):
         await run_and_check(dut, A, B)
         await ClockCycles(dut.clk, 1)
         cycles = int(dut.last_job_cycles.value)
-        assert cycles == K + 3 * N, f"latency {cycles} != K+3N = {K + 3 * N}"
+        drain = 2 * N - 2 if N > 1 else 1          # minimum drain, see sa_top.sv
+        expected = K + drain + N
+        assert cycles == expected, f"latency {cycles} != K+DRAIN+N = {expected}"
         perf.append({"N": N, "K": K, "cycles": cycles})
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     with open(os.path.join(RESULTS_DIR, f"sim_cycles_N{N}.json"), "w") as f:
         json.dump(perf, f, indent=1)
-    dut._log.info("latency check passed for 50 jobs (cycles = K + 3N)")
+    dut._log.info("latency check passed for 50 jobs (cycles = K + DRAIN + N)")
 
 
 @cocotb.test()

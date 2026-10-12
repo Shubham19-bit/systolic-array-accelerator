@@ -42,9 +42,9 @@ A[3][k] DDD> [PE30]-->[PE31]-->[PE32]-->[PE33]
 
 ### FSM
 
-`CLEAR → LOAD (K beats) → DRAIN (2N cycles) → OUTPUT (N rows) → CLEAR`
+`CLEAR → LOAD (K beats) → DRAIN (2N-2 cycles, 1 if N=1) → OUTPUT (N rows) → CLEAR`
 
-Latency without stalls: **K + 3N cycles** (verified in simulation).
+Latency without stalls: **K + DRAIN + N cycles** = K + 3N - 2 for N >= 2 (verified in simulation).
 
 ---
 

@@ -37,7 +37,8 @@ it in an interview. Prefer small, reviewable diffs over large rewrites.
 2. Skew: lane *i* is delayed exactly *i* **enabled** cycles (`skew_buffer.sv`).
 3. **One global `en`** gates every register (skew + PEs). Stalls must freeze everything.
 4. `clr` is synchronous and only asserted in the `CLEAR` state.
-5. Latency (no stalls) = **K + 3N** cycles, checked by `test_random_back_to_back`
+5. Latency (no stalls) = **K + DRAIN + N** cycles (DRAIN = 2N-2 for N>1, 1 for N=1, so
+   K + 3N - 2 for N>=2), checked by `test_random_back_to_back`
    and by `analysis/perf_model.py --validate`. If you change the pipeline, update
    `model/sa_cycle_model.py`, `analysis/perf_model.py:tile_cycles`, the test, and the README.
 6. Ports use **flat packed vectors** (no unpacked-array ports, no interfaces) so the code

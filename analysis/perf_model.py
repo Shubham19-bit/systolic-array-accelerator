@@ -4,10 +4,11 @@ perf_model.py - Analytical performance model of the systolic-array GEMM engine.
 For a GEMM  C[M x Nc] = A[M x K] * B[K x Nc]  on an n x n array the work is
 split into ceil(M/n) * ceil(Nc/n) output tiles. One tile costs (no stalls)
 
-    cycles_tile = K + 3n + 1      (K load, 2n drain, n output, 1 clear)
+    cycles_tile = K + drain + n + 1   (K load, drain, n output, 1 clear)
+    drain       = 2n - 2 for n > 1, 1 for n = 1
 
-which matches the RTL measurement  last_job_cycles = K + 3n  (+1 CLEAR cycle
-between back-to-back jobs). The model reports cycles, PE utilization, GOPS at a
+which matches the RTL measurement  last_job_cycles = K + drain + n  (+1 CLEAR
+cycle between back-to-back jobs). The model reports cycles, PE utilization, GOPS at a
 given clock frequency and a simple roofline (compute vs. interface bandwidth).
 
 Usage:
@@ -40,7 +41,8 @@ LAYERS = {
 
 
 def tile_cycles(n: int, K: int) -> int:
-    return K + 3 * n + 1
+    drain = 2 * n - 2 if n > 1 else 1
+    return K + drain + n + 1
 
 
 def gemm_perf(n: int, M: int, K: int, Nc: int, freq_mhz: float) -> dict:

@@ -19,7 +19,7 @@ S_CLEAR, S_LOAD, S_DRAIN, S_OUTPUT = 0, 1, 2, 3
 class SystolicArrayModel:
     def __init__(self, n: int = 4, dw: int = 8, aw: int = 32):
         self.n, self.dw, self.aw = n, dw, aw
-        self.drain_cyc = 2 * n
+        self.drain_cyc = 2 * n - 2 if n > 1 else 1
         self.reset()
 
     # ------------------------------------------------------------------ state
@@ -169,14 +169,14 @@ def _self_test():
                         p_ready=0.5 if stalls else 1.0)
             assert np.array_equal(C, A @ B), (n, K, trial)
             if not stalls:
-                assert m.last_job_cycles == K + 3 * n, (m.last_job_cycles, K, n)
+                assert m.last_job_cycles == K + m.drain_cyc + n, (m.last_job_cycles, K, n)
         # extreme values
         K = 64
         A = np.full((n, K), -128)
         B = np.full((K, n), -128)
         assert np.array_equal(run_job(m, A, B, rng), A @ B)
         print(f"N={n}: PASS (30 random jobs + extreme-value job)")
-    print("Cycle model self-test PASSED. Latency (no stalls) = K + 3N cycles.")
+    print("Cycle model self-test PASSED. Latency (no stalls) = K + DRAIN + N cycles (DRAIN = 2N-2, or 1 for N=1).")
 
 
 if __name__ == "__main__":

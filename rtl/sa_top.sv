@@ -23,7 +23,7 @@
 //   OUTPUT : streams the N result rows (holds data stable under back-pressure)
 //
 // Latency with no stalls (cycles from entering LOAD to last output handshake):
-//   K + DRAIN_CYC + N  =  K + 3N   (DRAIN_CYC = 2N)
+//   K + DRAIN_CYC + N  =  K + 3N - 2   (DRAIN_CYC = 2N - 2 for N > 1; N = 1 uses 1)
 // last_job_cycles reports the measured value for the previous job.
 // -----------------------------------------------------------------------------
 module sa_top #(
@@ -52,7 +52,8 @@ module sa_top #(
     output logic [CW-1:0]     last_job_cycles
 );
 
-    localparam int DRAIN_CYC = 2 * N;
+    // minimum drain: last beat needs N-1 skew cycles + N-1 hops to reach PE(N-1,N-1)
+    localparam int DRAIN_CYC = (N > 1) ? 2 * N - 2 : 1;
     localparam int DCW       = $clog2(DRAIN_CYC + 1);
     localparam int RCW       = (N > 1) ? $clog2(N) : 1;
 
