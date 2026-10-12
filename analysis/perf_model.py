@@ -5,7 +5,7 @@ For a GEMM  C[M x Nc] = A[M x K] * B[K x Nc]  on an n x n array the work is
 split into ceil(M/n) * ceil(Nc/n) output tiles. One tile costs (no stalls)
 
     cycles_tile = K + drain + n + 1   (K load, drain, n output, 1 clear)
-    drain       = 2n - 2 for n > 1, 1 for n = 1
+    drain       = (2n - 2 for n > 1, 1 for n = 1) + pipe     pipe = 1: PE registers its product
 
 which matches the RTL measurement  last_job_cycles = K + drain + n  (+1 CLEAR
 cycle between back-to-back jobs). The model reports cycles, PE utilization, GOPS at a
@@ -40,8 +40,8 @@ LAYERS = {
 }
 
 
-def tile_cycles(n: int, K: int) -> int:
-    drain = 2 * n - 2 if n > 1 else 1
+def tile_cycles(n: int, K: int, pipe: int = 1) -> int:
+    drain = (2 * n - 2 if n > 1 else 1) + pipe    # +1: pipelined PE adds its product late
     return K + drain + n + 1
 
 
@@ -132,7 +132,7 @@ def validate():
     for f in files:
         data = json.load(open(f))
         for d in data:
-            pred = tile_cycles(d["N"], d["K"]) - 1    # RTL counter excludes CLEAR
+            pred = tile_cycles(d["N"], d["K"], d.get("pipe", 1)) - 1   # RTL excludes CLEAR
             if pred != d["cycles"]:
                 ok = False
                 print(f"MISMATCH N={d['N']} K={d['K']}: model {pred}, RTL {d['cycles']}")

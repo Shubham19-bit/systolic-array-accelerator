@@ -13,6 +13,7 @@ synth/reports/
 # generated results (keep folder)
 results/*
 !results/.gitkeep
+!results/synth_area_fmax.png
 sim_build_N*/
 results.xml
 __pycache__/
@@ -21,3 +22,5 @@ __pycache__/
 .venv/
 formal/sa_top_*/
 synth/reports/
+formal/sa_top/
+formal/status.sqlite

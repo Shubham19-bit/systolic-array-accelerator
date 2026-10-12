@@ -21,6 +21,16 @@ def params():
     return int(os.environ.get("SA_N", "4"))
 
 
+def pipe_param():
+    """PE pipelining (0/1) from the Makefile (exported as SA_PIPE)."""
+    return int(os.environ.get("SA_PIPE", "1"))
+
+
+def drain_cycles(n: int, pipe: int) -> int:
+    """DRAIN length of sa_top: minimum 2N-2 (1 for N=1), +1 if the PE is pipelined."""
+    return (2 * n - 2 if n > 1 else 1) + pipe
+
+
 # ----------------------------------------------------------------- bit packing
 def to_unsigned(v: int, width: int) -> int:
     return int(v) & ((1 << width) - 1)

@@ -23,14 +23,16 @@
 //   OUTPUT : streams the N result rows (holds data stable under back-pressure)
 //
 // Latency with no stalls (cycles from entering LOAD to last output handshake):
-//   K + DRAIN_CYC + N  =  K + 3N - 2   (DRAIN_CYC = 2N - 2 for N > 1; N = 1 uses 1)
+//   K + DRAIN_CYC + N,   DRAIN_CYC = (2N - 2 for N > 1, 1 for N = 1) + PIPE
+//   i.e. K + 3N - 2 without PE pipelining (PIPE = 0), K + 3N - 1 with it (PIPE = 1, N > 1).
 // last_job_cycles reports the measured value for the previous job.
 // -----------------------------------------------------------------------------
 module sa_top #(
-    parameter int N  = 4,
-    parameter int DW = 8,
-    parameter int AW = 32,
-    parameter int CW = 32          // width of the performance cycle counter
+    parameter int N    = 4,
+    parameter int DW   = 8,
+    parameter int AW   = 32,
+    parameter int CW   = 32,       // width of the performance cycle counter
+    parameter int PIPE = 1         // 1: PE registers its product before accumulating
 ) (
     input  logic              clk,
     input  logic              rst_n,
@@ -52,8 +54,9 @@ module sa_top #(
     output logic [CW-1:0]     last_job_cycles
 );
 
-    // minimum drain: last beat needs N-1 skew cycles + N-1 hops to reach PE(N-1,N-1)
-    localparam int DRAIN_CYC = (N > 1) ? 2 * N - 2 : 1;
+    // minimum drain: last beat needs N-1 skew cycles + N-1 hops to reach PE(N-1,N-1);
+    // a pipelined PE needs one more enabled cycle to add its registered product.
+    localparam int DRAIN_CYC = ((N > 1) ? 2 * N - 2 : 1) + PIPE;
     localparam int DCW       = $clog2(DRAIN_CYC + 1);
     localparam int RCW       = (N > 1) ? $clog2(N) : 1;
 
@@ -154,7 +157,7 @@ module sa_top #(
         .din (b_raw), .dout (b_skew)
     );
 
-    systolic_array #(.N(N), .DW(DW), .AW(AW)) u_array (
+    systolic_array #(.N(N), .DW(DW), .AW(AW), .PIPE(PIPE)) u_array (
         .clk      (clk),
         .rst_n    (rst_n),
         .en       (en),
@@ -195,6 +198,10 @@ module sa_top #(
                 assert (m_axis_tdata == $past(m_axis_tdata));
                 assert (m_axis_tlast == $past(m_axis_tlast));
             end
+            // P5: after the last output beat the FSM returns to CLEAR
+            if ($past(out_fire && m_axis_tlast)) assert (state == S_CLEAR);
+            // P6 (stall safety): with en = 0 and no clear, every accumulator holds its value
+            if ($past(!en && !clr)) assert (acc_flat == $past(acc_flat));
         end
     end
 
@@ -206,6 +213,8 @@ module sa_top #(
             if (m_axis_tlast) assert (m_axis_tvalid);
             // P4: row index stays in range
             assert (row_idx <= ROW_LAST);
+            // P7: no input is accepted while the pipeline drains
+            if (state == S_DRAIN) assert (!s_axis_tready);
         end
     end
 

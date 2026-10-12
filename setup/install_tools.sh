@@ -8,8 +8,8 @@
 #   * OSS CAD Suite  -> Icarus Verilog, Verilator, Yosys, SymbiYosys, GTKWave, ...
 #                       (into ~/tools/oss-cad-suite, added to ~/.bashrc)
 #   * Python packages -> cocotb, pyuvm, numpy, matplotlib (into ~/sa-pylibs, suite Python)
-#   * sky130 HD standard-cell liberty file (for real area/timing, week 3)
-# OpenSTA is optional and covered in PATHWAY.md (week 3).
+#   * sky130 PDK + OpenSTA/OpenROAD (micromamba env in ~/tools/mm/env; real area/timing,
+#                       week 3). Optional: SKIP_PDK=1 bash setup/install_tools.sh
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -64,16 +64,18 @@ fi
 export PYTHONPATH="$PYLIBS:${PYTHONPATH:-}"
 export PATH="$PYLIBS/bin:$PATH"
 
-echo ">>> [4/4] sky130 HD liberty (typical corner)"
-mkdir -p "$TOOLS/sky130"
-LIBF="$TOOLS/sky130/sky130_fd_sc_hd__tt_025C_1v80.lib"
-if [[ ! -f "$LIBF" ]]; then
-  curl -L -f -o "$LIBF" \
-    https://raw.githubusercontent.com/google/skywater-pdk-libs-sky130_fd_sc_hd/main/timing/sky130_fd_sc_hd__tt_025C_1v80.lib \
-    || echo "WARN: liberty download failed - see PATHWAY.md week 3 for the 'volare' alternative."
-fi
-if [[ -f "$LIBF" ]] && ! grep -q "sky130_fd_sc_hd__tt_025C_1v80.lib" "$HOME/.bashrc"; then
-  echo "export LIB=$LIBF" >> "$HOME/.bashrc"
+echo ">>> [4/4] sky130 PDK (liberty) + OpenSTA + OpenROAD via micromamba (no root needed)"
+# The old raw.githubusercontent.com liberty URL returns 404, and OpenSTA is not in the OSS
+# CAD Suite. The litex-hub conda channel ships both `open_pdks.sky130a` (all sky130 libs)
+# and `openroad` (which includes the `sta` binary). ~1 GB download, ~9 GB on disk.
+# Skip with SKIP_PDK=1. synth/run_synth.sh finds LIB and sta in ~/tools/mm/env by itself.
+MM="$TOOLS/mm"
+if [[ "${SKIP_PDK:-0}" != "1" && ! -x "$MM/env/bin/sta" ]]; then
+  mkdir -p "$MM"
+  curl -L -f https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C "$MM" bin/micromamba
+  MAMBA_ROOT_PREFIX="$MM/root" "$MM/bin/micromamba" create -y -p "$MM/env" \
+    -c litex-hub -c conda-forge openroad open_pdks.sky130a \
+    || echo "WARN: PDK/OpenSTA install failed - synthesis still works without it (generic gates)."
 fi
 
 echo

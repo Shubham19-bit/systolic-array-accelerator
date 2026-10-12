@@ -17,9 +17,10 @@ S_CLEAR, S_LOAD, S_DRAIN, S_OUTPUT = 0, 1, 2, 3
 
 
 class SystolicArrayModel:
-    def __init__(self, n: int = 4, dw: int = 8, aw: int = 32):
-        self.n, self.dw, self.aw = n, dw, aw
-        self.drain_cyc = 2 * n - 2 if n > 1 else 1
+    def __init__(self, n: int = 4, dw: int = 8, aw: int = 32, pipe: int = 1):
+        self.n, self.dw, self.aw, self.pipe = n, dw, aw, pipe
+        # minimum drain, plus one enabled cycle to add the registered product (pipe = 1)
+        self.drain_cyc = (2 * n - 2 if n > 1 else 1) + pipe
         self.reset()
 
     # ------------------------------------------------------------------ state
@@ -37,6 +38,7 @@ class SystolicArrayModel:
         self.a_out = np.zeros((n, n), dtype=np.int64)
         self.b_out = np.zeros((n, n), dtype=np.int64)
         self.acc = np.zeros((n, n), dtype=np.int64)
+        self.prod = np.zeros((n, n), dtype=np.int64)    # registered product (pipe = 1)
 
     # ------------------------------------------------------ combinational view
     def s_ready(self) -> bool:
@@ -92,11 +94,15 @@ class SystolicArrayModel:
             self.a_out[:] = 0
             self.b_out[:] = 0
             self.acc[:] = 0
+            self.prod[:] = 0
         elif en:
             for i in range(1, n):
                 self.skew_a[i] = [a_raw[i]] + self.skew_a[i][:-1]
                 self.skew_b[i] = [b_raw[i]] + self.skew_b[i][:-1]
-            self.acc = self._wrap(self.acc + a_in * b_in)
+            product = a_in * b_in
+            # pipe = 1: add last cycle's registered product, register this cycle's
+            self.acc = self._wrap(self.acc + (self.prod if self.pipe else product))
+            self.prod = product
             self.a_out = a_in
             self.b_out = b_in
 
@@ -157,8 +163,8 @@ def run_job(model: SystolicArrayModel, A: np.ndarray, B: np.ndarray,
 
 def _self_test():
     rng = np.random.default_rng(1)
-    for n in (1, 2, 3, 4, 8):
-        m = SystolicArrayModel(n)
+    for pipe, n in [(p, n) for p in (0, 1) for n in (1, 2, 3, 4, 8)]:
+        m = SystolicArrayModel(n, pipe=pipe)
         for trial in range(30):
             K = int(rng.integers(1, 40))
             A = rng.integers(-128, 128, size=(n, K))
@@ -175,8 +181,9 @@ def _self_test():
         A = np.full((n, K), -128)
         B = np.full((K, n), -128)
         assert np.array_equal(run_job(m, A, B, rng), A @ B)
-        print(f"N={n}: PASS (30 random jobs + extreme-value job)")
-    print("Cycle model self-test PASSED. Latency (no stalls) = K + DRAIN + N cycles (DRAIN = 2N-2, or 1 for N=1).")
+        print(f"PIPE={pipe} N={n}: PASS (30 random jobs + extreme-value job)")
+    print("Cycle model self-test PASSED. Latency (no stalls) = K + DRAIN + N cycles, "
+          "DRAIN = (2N-2, or 1 for N=1) + PIPE.")
 
 
 if __name__ == "__main__":

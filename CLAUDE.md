@@ -31,7 +31,8 @@ it in an interview. Prefer small, reviewable diffs over large rewrites.
 | coverage closure (N=2,4,8) | `make cov` |
 | bug-injection check | `make bugs` (writes docs/bug_injection.md) |
 | formal | `make formal` |
-| synthesis (+timing) | `make synth` |
+| synthesis (+timing) | `make synth` (`PIPE=0\|1`, `CLK_PERIOD=<ns>`) |
+| Fmax before/after PE pipelining | `make fmax` then `python3 analysis/summarize_synth.py` |
 | performance model | `make perf` |
 
 ## Architecture rules (keep these invariants)
@@ -39,14 +40,20 @@ it in an interview. Prefer small, reviewable diffs over large rewrites.
 2. Skew: lane *i* is delayed exactly *i* **enabled** cycles (`skew_buffer.sv`).
 3. **One global `en`** gates every register (skew + PEs). Stalls must freeze everything.
 4. `clr` is synchronous and only asserted in the `CLEAR` state.
-5. Latency (no stalls) = **K + DRAIN + N** cycles (DRAIN = 2N-2 for N>1, 1 for N=1, so
-   K + 3N - 2 for N>=2), checked by `test_random_back_to_back`
-   and by `analysis/perf_model.py --validate`. If you change the pipeline, update
-   `model/sa_cycle_model.py`, `analysis/perf_model.py:tile_cycles`, the test, and the README.
+5. Latency (no stalls) = **K + DRAIN + N** cycles, DRAIN = (2N-2 for N>1, 1 for N=1) + `PIPE`.
+   `PIPE=1` (default) registers the product inside every PE (shorter critical path, +1 cycle),
+   `PIPE=0` is the unpipelined baseline, so K+3N-1 / K+3N-2 for N>=2. Checked by
+   `test_random_back_to_back`, `test_cycle_accurate_vs_model` and `perf_model.py --validate`.
+   If you change the pipeline, update `model/sa_cycle_model.py`,
+   `analysis/perf_model.py:tile_cycles`, `tb/common/sa_utils.py:drain_cycles`, the tests and
+   the README. Run the regressions for both `PIPE=1` and `PIPE=0` (`make sweep PIPE=0`).
 6. Ports use **flat packed vectors** (no unpacked-array ports, no interfaces) so the code
    works in Icarus, Verilator, and Yosys. No `typedef enum`; FSM states are localparams.
 7. Formal properties live in `rtl/sa_top.sv` under `` `ifdef FORMAL `` using immediate
    assertions + `$past` (open-source Yosys does not support concurrent SVA).
+8. Synthesis/STA: sky130 liberty + OpenSTA (`sta`) live in the micromamba env
+   `~/tools/mm/env`; `synth/run_synth.sh` finds them itself. Do not put that env's `bin/` on
+   `PATH` (its Python and tools would shadow the OSS CAD Suite's).
 
 ## Verification rules
 - The golden model is `tb/common/sa_utils.py:golden()` (NumPy, wraps to 32 bits).

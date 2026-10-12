@@ -7,7 +7,8 @@
 #   make cov        -> pyuvm regression for N = 2, 4, 8 + merged functional-coverage closure
 #   make bugs       -> bug-injection check of the testbenches (writes docs/bug_injection.md)
 #   make formal     -> SymbiYosys proof + cover
-#   make synth      -> Yosys synthesis sweep (+ OpenSTA if LIB is set)
+#   make synth      -> Yosys synthesis sweep (+ OpenSTA if LIB is set)   PIPE=0|1 CLK_PERIOD=<ns>
+#   make fmax       -> synthesis + STA for PIPE=0 and PIPE=1, then the before/after table + results/synth_area_fmax.png
 #   make perf       -> analytical model, plots, and model-vs-RTL validation
 #   make all        -> everything above
 
@@ -15,7 +16,7 @@ N ?= 4
 # The OSS CAD Suite's Python 3.11: ~/sa-pylibs (numpy, cocotb 1.9.2, ...) is built for it,
 # not for Ubuntu's python3 (3.10).  See CLAUDE.md "Environment".
 PY ?= tabbypy3
-.PHONY: check model test sweep uvm cov bugs formal synth perf all clean
+.PHONY: check model test sweep uvm cov bugs formal synth fmax perf all clean
 
 check:
 	@bash setup/check_tools.sh
@@ -46,6 +47,11 @@ formal:
 synth:
 	bash synth/run_synth.sh
 	$(PY) analysis/summarize_synth.py
+
+fmax:
+	bash synth/sweep_fmax.sh
+	$(PY) analysis/summarize_synth.py
+	$(PY) analysis/plot_synth.py
 
 perf:
 	$(PY) analysis/perf_model.py

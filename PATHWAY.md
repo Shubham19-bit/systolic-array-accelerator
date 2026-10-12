@@ -135,9 +135,9 @@ short list of injected bugs and which test caught each.
 ```bash
 make formal          # runs 'prove' (k-induction) and 'cover'
 ```
-- [ ] Get `prove` to PASS. If induction fails on an unreachable state, add the missing
+- [x] Get `prove` to PASS. If induction fails on an unreachable state, add the missing
       invariant as an `assert` (this is normal and a great interview story).
-- [ ] Add one property of your own, e.g. "`s_axis_tready` is never high during DRAIN",
+- [x] Add one property of your own, e.g. "`s_axis_tready` is never high during DRAIN",
       or "after the last output beat the FSM returns to CLEAR".
 - [ ] Look at the `cover` trace (`formal/sa_top_cover/engine_0/trace0.vcd`).
 
@@ -145,12 +145,15 @@ make formal          # runs 'prove' (k-induction) and 'cover'
 ```bash
 make synth           # generic gates if $LIB is unset; sky130 area if set
 ```
-- [ ] Record cells and area for N = 2, 4, 8. Plot area vs N² - it should be ~linear.
-- [ ] Find what dominates area (multipliers? accumulators? skew regs?) using
+- [x] Record cells and area for N = 2, 4, 8. Plot area vs N² - it should be ~linear.
+- [x] Find what dominates area (multipliers? accumulators? skew regs?) using
       `stat` per module (remove `-flatten` in `run_synth.sh` for a hierarchical report).
 
 ### 3.3 Static timing (OpenSTA)
-OpenSTA is not in OSS CAD Suite. Easiest options:
+OpenSTA is not in OSS CAD Suite. **What worked here (no root, no Docker):** `setup/install_tools.sh`
+creates a micromamba env `~/tools/mm/env` from the `litex-hub` channel with `openroad` (includes the
+`sta` binary) and `open_pdks.sky130a` (the liberty files, ~1 GB download / ~9 GB on disk).
+`synth/run_synth.sh` finds `sta` and `LIB` there by itself. Other options:
 1. **Docker:** `docker run -it -v $PWD:/work openroad/orfs:latest bash` (contains `sta`),
    then run `bash synth/run_synth.sh` inside the container.
 2. **Build from source:** <https://github.com/The-OpenROAD-Project/OpenSTA> (README build steps).
@@ -160,10 +163,10 @@ If the sky130 liberty download failed: `pip install volare && volare enable --pd
 `~/.volare/sky130A/libs.ref/sky130_fd_sc_hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib`.
 
 ```bash
-CLK_PERIOD=10 make synth        # 100 MHz target; try 8, 6, 5 ...
+CLK_PERIOD=5 make synth         # or: make fmax  (PIPE=0 vs PIPE=1, tables + plot)
 ```
-- [ ] Find **Fmax** and the **critical path** (expect: multiplier → adder → acc register).
-- [ ] **Optimise:** pipeline the PE (register the product before accumulating). This adds
+- [x] Find **Fmax** and the **critical path** (expect: multiplier → adder → acc register).
+- [x] **Optimise:** pipeline the PE (register the product before accumulating). This adds
       one cycle of latency → update DRAIN, the cycle model, `tile_cycles`, the latency
       test, and the README. Show Fmax before vs after. **This is your best interview story.**
 

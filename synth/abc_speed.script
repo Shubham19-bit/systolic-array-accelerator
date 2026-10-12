@@ -1,0 +1,15 @@
+# ABC script for timing-driven mapping (used by run_synth.sh: abc -script ... -D <ps>).
+# Plain `abc -liberty` maps every gate at minimum size and does not buffer, so the
+# global en/clr nets (thousands of flop-enable loads) end up with delays of 100+ ns.
+# This adds fan-out buffering and gate sizing toward the clock-period target {D}.
+&get -n
+&st
+&dch
+&nf {D}
+&put
+buffer -c
+topo
+stime -c
+upsize -c {D}
+dnsize -c {D}
+stime -c

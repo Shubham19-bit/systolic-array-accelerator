@@ -12,9 +12,10 @@
 // design is portable across Icarus Verilog, Verilator and Yosys.
 // -----------------------------------------------------------------------------
 module systolic_array #(
-    parameter int N  = 4,
-    parameter int DW = 8,
-    parameter int AW = 32
+    parameter int N    = 4,
+    parameter int DW   = 8,
+    parameter int AW   = 32,
+    parameter int PIPE = 1       // see pe.sv
 ) (
     input  logic              clk,
     input  logic              rst_n,
@@ -47,7 +48,7 @@ module systolic_array #(
 
         for (i = 0; i < N; i = i + 1) begin : g_row
             for (j = 0; j < N; j = j + 1) begin : g_col
-                pe #(.DW(DW), .AW(AW)) u_pe (
+                pe #(.DW(DW), .AW(AW), .PIPE(PIPE)) u_pe (
                     .clk   (clk),
                     .rst_n (rst_n),
                     .en    (en),

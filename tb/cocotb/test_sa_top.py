@@ -16,13 +16,15 @@ import cocotb
 import numpy as np
 from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge
 
-from sa_utils import (DW, golden, pack_beat, params, recv_job, reset_dut,
-                      send_job, start_clock_and_reset, unpack_row)
+from sa_utils import (DW, drain_cycles, golden, pack_beat, params, pipe_param,
+                      recv_job, reset_dut, send_job, start_clock_and_reset,
+                      unpack_row)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "model"))
 from sa_cycle_model import SystolicArrayModel  # noqa: E402
 
 N = params()
+PIPE = pipe_param()
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "results")
 
 
@@ -82,10 +84,9 @@ async def test_random_back_to_back(dut):
         await run_and_check(dut, A, B)
         await ClockCycles(dut.clk, 1)
         cycles = int(dut.last_job_cycles.value)
-        drain = 2 * N - 2 if N > 1 else 1          # minimum drain, see sa_top.sv
-        expected = K + drain + N
+        expected = K + drain_cycles(N, PIPE) + N    # see DRAIN_CYC in sa_top.sv
         assert cycles == expected, f"latency {cycles} != K+DRAIN+N = {expected}"
-        perf.append({"N": N, "K": K, "cycles": cycles})
+        perf.append({"N": N, "K": K, "pipe": PIPE, "cycles": cycles})
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     with open(os.path.join(RESULTS_DIR, f"sim_cycles_N{N}.json"), "w") as f:
@@ -132,7 +133,7 @@ async def test_cycle_accurate_vs_model(dut):
     wrong final result.
     """
     await start_clock_and_reset(dut)
-    model = SystolicArrayModel(N)
+    model = SystolicArrayModel(N, pipe=PIPE)
     model.step(False, m_ready=False)    # reset_dut() last edge took CLEAR -> LOAD
 
     rng = random.Random(5)
