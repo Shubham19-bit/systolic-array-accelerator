@@ -178,14 +178,14 @@ before/after result for the PE pipelining.
 ## Week 4 - Performance analysis & presentation
 
 ### Tasks
-- [ ] `make perf` → table + `results/utilization_vs_size.png` + `results/roofline_n32.png`.
-- [ ] `python3 analysis/perf_model.py --validate` after `make sweep` - model must match RTL.
-- [ ] Use **your Fmax** from week 3: `python3 analysis/perf_model.py --freq <Fmax>`.
-- [ ] Write the analysis in the README:
+- [x] `make perf` → table + `results/utilization_vs_size.png` + `results/roofline_n32.png`.
+- [x] `python3 analysis/perf_model.py --validate` after `make sweep` - model must match RTL.
+- [x] Use **your Fmax** from week 3: `python3 analysis/perf_model.py --freq <Fmax>`.
+- [x] Write the analysis in the README:
   - Utilization drops for small layers / big arrays (fill + drain overhead = 3N per tile).
   - The roofline shows the design is **interface-bandwidth bound** (2N bytes/cycle in);
     explain why weight-stationary or on-chip buffering would raise arithmetic intensity.
-- [ ] Fill in the README results table, add the plots, and add a block diagram.
+- [x] Fill in the README results table, add the plots, and add a block diagram.
 - [ ] Record a 2-minute demo video or GIF of the waveform (optional, but helps).
 
 **DoD Week 4:** README tells the whole story with numbers. Repo is pinned on GitHub.
@@ -208,15 +208,16 @@ before/after result for the PE pipelining.
 ## Resume bullets (fill in the real numbers)
 **Systolic-Array INT8 GEMM Accelerator** | SystemVerilog, cocotb, pyuvm, Yosys, OpenSTA, SymbiYosys
 - Designed a parameterized **N×N output-stationary systolic array** with AXI4-Stream
-  interfaces and stall-safe global enable, sustaining **<util>% PE utilization** on
-  ResNet-18 layers.
+  interfaces and stall-safe global enable, sustaining **86-98 % PE utilization** on
+  ResNet-18 conv layers (8x8 array, modelled).
 - Verified with a **pyuvm environment** (driver, monitor, scoreboard, coverage) and
-  **<n> constrained-random jobs** under random back-pressure; proved AXI handshake
+  **200+ constrained-random and directed jobs per array size** under random
+  back-pressure, 27 coverage bins closed, and 12/12 injected RTL bugs caught; proved 7 handshake/FSM
   properties with **SymbiYosys k-induction**.
-- Synthesized on **SkyWater 130 nm**: **<area> µm²** and **<Fmax> MHz** for 8×8; pipelining
-  the PE raised Fmax by **<x>%**.
+- Synthesized on **SkyWater 130 nm**: **385,388 µm²** and **187.6 MHz** for 8×8; pipelining
+  the PE raised Fmax by **94 %** (96.5 → 187.6 MHz).
 - Built a **cycle-accurate model** and **roofline analysis** matching RTL latency
-  (K + 3N cycles) exactly; identified interface bandwidth as the bottleneck.
+  (K + 3N − 1 cycles) exactly, cycle by cycle; identified interface bandwidth as the bottleneck.
 
 ## Interview questions you should be ready for
 1. Why output-stationary? What changes for weight-stationary?

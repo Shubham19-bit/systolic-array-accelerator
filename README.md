@@ -6,7 +6,7 @@ checked with **formal properties (SymbiYosys)**, synthesized with **Yosys** on t
 **SkyWater 130 nm** library, and analysed with a **cycle-accurate model** and a
 **roofline performance model**.
 
-> Status: work in progress. See [`PATHWAY.md`](PATHWAY.md) for the plan and progress.
+> Status: RTL, verification, formal proof, synthesis/timing and performance analysis are done (see [`PATHWAY.md`](PATHWAY.md)); the stretch goals are open.
 
 ---
 
@@ -30,6 +30,38 @@ A[3][k] DDD> [PE30]-->[PE31]-->[PE32]-->[PE33]
 * **Global enable:** input bubbles (`tvalid=0`) freeze the whole pipeline, so
   stalls never corrupt results.
 
+### Block diagrams
+
+```mermaid
+flowchart LR
+    IN["AXI4-Stream in<br/>beat k = A column k + B row k<br/>2N bytes"] --> SKA["skew buffer A<br/>lane i delayed i cycles"]
+    IN --> SKB["skew buffer B<br/>lane j delayed j cycles"]
+    SKA --> ARR["N x N PE array<br/>output-stationary"]
+    SKB --> ARR
+    ARR --> MUX["row mux<br/>row_idx"]
+    MUX --> OUT["AXI4-Stream out<br/>one row of C per beat"]
+    IN -->|"tvalid, tlast"| FSM["FSM<br/>CLEAR, LOAD, DRAIN, OUTPUT"]
+    OUT -->|"tready"| FSM
+    FSM -->|"en, clr (global)"| SKA
+    FSM -->|"en, clr (global)"| SKB
+    FSM -->|"en, clr (global)"| ARR
+    FSM -->|"row_idx"| MUX
+```
+
+One PE (`PIPE=1`): the product is registered before it is accumulated.
+
+```mermaid
+flowchart LR
+    A["a_in"] --> MUL["x multiplier"]
+    B["b_in"] --> MUL
+    MUL --> PR["prod_r register"]
+    PR --> ADD["+ adder"]
+    ADD --> ACC["acc register (C element)"]
+    ACC --> ADD
+    A --> AO["a_out register<br/>to right neighbour"]
+    B --> BO["b_out register<br/>to lower neighbour"]
+```
+
 ### Interface
 
 | Port | Width | Meaning |
@@ -42,9 +74,9 @@ A[3][k] DDD> [PE30]-->[PE31]-->[PE32]-->[PE33]
 
 ### FSM
 
-`CLEAR → LOAD (K beats) → DRAIN (2N-2 cycles, 1 if N=1) → OUTPUT (N rows) → CLEAR`
+`CLEAR → LOAD (K beats) → DRAIN → OUTPUT (N rows) → CLEAR`,  DRAIN = (2N-2, or 1 if N=1) + `PIPE`
 
-Latency without stalls: **K + DRAIN + N cycles** = K + 3N - 2 for N >= 2 (verified in simulation).
+Latency without stalls: **K + DRAIN + N cycles**: K + 3N - 1 with the pipelined PE (`PIPE=1`, default), K + 3N - 2 without it, for N >= 2 (checked cycle by cycle against the model).
 
 ---
 
@@ -150,3 +182,77 @@ delay, no placement or wire parasitics, so these are pre-layout estimates. Fmax 
 * **Caveats.** Clock is ideal and I/O delays are zero. The mapped result did not change with the clock
   target (3, 5 and 8 ns gave the same netlist at N=4), so one target is used. Synthesis only: there is no
   placement, routing, or wire load yet (OpenLane would add those).
+
+## Performance analysis
+
+`analysis/perf_model.py` lowers CNN/Transformer layers to GEMM (im2col), tiles them onto an n x n array and
+counts cycles. Its tile cost is checked against the RTL: `make perf` ends with `Model matches RTL cycle
+counts` (50 simulated jobs at each of N = 2, 4, 8). Clock: **187.6 MHz**, the Fmax measured for the 8x8
+design. Larger arrays were not synthesized (Fmax fell from 196 to 188 MHz between N=2 and N=8), so the 16x16
+and 32x32 figures assume the same clock and are somewhat optimistic. GOPS are modelled, not measured on
+hardware.
+
+### Where utilization goes
+
+One tile costs `K + 3n` cycles (1 CLEAR + K LOAD + 2n-1 DRAIN + n OUTPUT). Utilization is therefore exactly
+
+```
+utilization = K / (K + 3n)   x   padding efficiency
+              (fill + drain)     (M / (n*ceil(M/n))) * (Nc / (n*ceil(Nc/n)))
+```
+
+(checked against the model for all 28 layer/size points: the difference is below 1e-15). At n = 32:
+
+| Layer (M x K x Nc) | K / (K+3n) | padding | **utilization** | GOPS (peak 384) | at 8x8 |
+|---|---|---|---|---|---|
+| ResNet18 conv1 (64 x 147 x 12544) | 60.5 % | 100 % | **60.5 %** | 232 | 86.0 % |
+| ResNet18 conv2_x (64 x 576 x 3136) | 85.7 % | 100 % | **85.7 %** | 329 | 96.0 % |
+| ResNet18 conv3_x (128 x 1152 x 784) | 92.3 % | 98.0 % | **90.5 %** | 348 | 98.0 % |
+| ResNet18 conv4_x (256 x 2304 x 196) | 96.0 % | 87.5 % | **84.0 %** | 323 | 97.0 % |
+| ResNet18 conv5_x (512 x 4608 x 49) | 98.0 % | 76.6 % | **75.0 %** | 288 | 87.0 % |
+| ResNet18 fc (1000 x 512 x 1) | 84.2 % | 3.1 % | **2.6 %** | 10 | 11.9 % |
+| BERT-base QKV (2304 x 768 x 128) | 88.9 % | 100 % | **88.9 %** | 342 | 97.0 % |
+
+![utilization vs array size](results/utilization_vs_size.png)
+
+* **Small K (conv1, K = 147):** the 3n fill/drain/output cycles per tile are not amortized, so a bigger
+  array loses more (at n = 32 the overhead is 96 of 243 cycles).
+* **Layer smaller than the array (conv5_x):** the feature map is 7x7 = 49 output columns, which fill 49 of
+  the 64 columns of two 32-wide tiles. This is the "32x32 array on a 7x7 layer" case: 76.6 % padding
+  efficiency, 75 % overall even though K is large.
+* **Matrix-vector (fc, Nc = 1):** only one of n columns does useful work, so utilization is about 1/n
+  (2.6 % at n = 32). Batching images, which widens Nc, is the fix, not a different array.
+
+### Roofline: the design is interface-bandwidth bound
+
+![roofline](results/roofline_n32.png)
+
+The array consumes `2n` bytes per cycle (n values of A and n of B) to perform `n²` MACs, so the 32x32 array
+needs 64 B/cycle = **12.0 GB/s** at 187.6 MHz for its 384 GOPS peak (48 GB/s at n = 128: the
+requirement grows linearly with n). Every tile re-streams its operands, so the arithmetic intensity is
+`nK / (K + 2n)` ops/byte, always below `n` ops/byte, which is exactly where the roofline's knee sits. All
+layers therefore lie on the bandwidth slope, or just under it because of fill/drain and padding; the large
+layers reach 22-30 ops/byte, `fc` only 0.9.
+
+### What would raise the intensity
+
+In this dataflow each element of A is streamed once for every column tile that uses it (`ceil(Nc/n)`
+times) and each element of B once per row tile (`ceil(M/n)` times). Holding an operand panel in on-chip
+SRAM, or making one operand stationary (weight-stationary: load a weight tile once, stream all activations
+past it, accumulate partial sums on chip), removes that re-streaming. Upper bound with an unbounded
+buffer (every operand read once, C written once), 32x32 array:
+
+| Layer | streamed now (MB) | ideal reuse (MB) | reduction | ops/byte now | ops/byte ideal |
+|---|---|---|---|---|---|
+| conv1 | 10.59 | 5.06 | 2.1x | 22.3 | 46.6 |
+| conv2_x | 8.03 | 2.65 | 3.0x | 28.8 | 87.4 |
+| conv3_x | 7.78 | 1.45 | 5.4x | 29.7 | 159.2 |
+| conv4_x | 8.49 | 1.24 | 6.8x | 27.2 | 186.1 |
+| conv5_x | 9.57 | 2.69 | 3.6x | 24.2 | 86.1 |
+| fc | 1.18 | 0.52 | 2.3x | 0.9 | 2.0 |
+| BERT QKV | 15.34 | 3.05 | 5.0x | 29.5 | 148.6 |
+
+Every layer except `fc` would move to the right of the knee (32 ops/byte), i.e. become compute-bound.
+This is an upper bound: a real buffer is finite, and a weight-stationary array pays weight-load cycles
+(normally hidden with double buffering) that this model does not count. Neither the buffer nor the
+weight-stationary variant is implemented here (see the stretch goals in `PATHWAY.md`).

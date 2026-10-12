@@ -14,6 +14,8 @@ synth/reports/
 results/*
 !results/.gitkeep
 !results/synth_area_fmax.png
+!results/roofline_n32.png
+!results/utilization_vs_size.png
 sim_build_N*/
 results.xml
 __pycache__/

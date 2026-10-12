@@ -16,6 +16,8 @@ N ?= 4
 # The OSS CAD Suite's Python 3.11: ~/sa-pylibs (numpy, cocotb 1.9.2, ...) is built for it,
 # not for Ubuntu's python3 (3.10).  See CLAUDE.md "Environment".
 PY ?= tabbypy3
+# Clock for `make perf` (MHz): measured Fmax of the 8x8 PIPE=1 design (see README).
+FREQ ?= 187.6
 .PHONY: check model test sweep uvm cov bugs formal synth fmax perf all clean
 
 check:
@@ -54,7 +56,7 @@ fmax:
 	$(PY) analysis/plot_synth.py
 
 perf:
-	$(PY) analysis/perf_model.py
+	$(PY) analysis/perf_model.py --freq $(FREQ)
 	$(PY) analysis/perf_model.py --validate
 
 all: model sweep uvm formal synth perf

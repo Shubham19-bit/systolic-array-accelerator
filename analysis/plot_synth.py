@@ -17,14 +17,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 
+from plot_style import CATEGORICAL, GRID, INK, MUTED, SURFACE  # noqa: E402
 from summarize_synth import REP, collect, fmax  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESULTS = os.path.join(HERE, "..", "results")
 
-SURFACE, INK, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e6e5e1"
-SERIES = {0: ("PE not pipelined (PIPE=0)", "#2a78d6"),
-          1: ("PE with product register (PIPE=1)", "#eb6834")}
+SERIES = {0: ("PE not pipelined (PIPE=0)", CATEGORICAL[0]),
+          1: ("PE with product register (PIPE=1)", CATEGORICAL[1])}
 
 
 def best_rows() -> dict[int, dict[int, tuple[float, float]]]:

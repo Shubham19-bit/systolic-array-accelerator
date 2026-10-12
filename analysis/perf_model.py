@@ -13,7 +13,7 @@ given clock frequency and a simple roofline (compute vs. interface bandwidth).
 
 Usage:
   python analysis/perf_model.py                      # table + plots for CNN layers
-  python analysis/perf_model.py --freq 200 --sizes 4 8 16 32
+  python analysis/perf_model.py --freq 187.6 --sizes 4 8 16 32
   python analysis/perf_model.py --validate           # compare with results/sim_cycles_N*.json
 """
 from __future__ import annotations
@@ -79,48 +79,32 @@ def table(sizes, freq):
 
 def plots(rows, sizes, freq):
     try:
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        from plot_perf import make_plots
     except ImportError:
         print("matplotlib not installed - skipping plots")
         return
-    os.makedirs(RESULTS, exist_ok=True)
+    make_plots(rows, sizes, freq, LAYERS, RESULTS)
 
-    # 1) utilization vs array size per layer
-    fig, ax = plt.subplots(figsize=(8, 4.5))
-    for name in LAYERS:
-        ys = [p["util"] * 100 for (lname, n, p) in rows if lname == name]
-        ax.plot(sizes, ys, marker="o", label=name)
-    ax.set_xscale("log", base=2)
-    ax.set_xticks(sizes, [str(s) for s in sizes])
-    ax.set_xlabel("array size n (n x n PEs)")
-    ax.set_ylabel("PE utilization (%)")
-    ax.set_title("Utilization vs. array size (output-stationary, no stalls)")
-    ax.grid(alpha=0.3)
-    ax.legend(fontsize=8)
-    fig.tight_layout()
-    fig.savefig(os.path.join(RESULTS, "utilization_vs_size.png"), dpi=150)
 
-    # 2) roofline for the largest array
-    n = sizes[-1]
-    peak = 2 * n * n * freq * 1e6 / 1e9
-    bw_gbs = 2 * n * freq * 1e6 / 1e9       # input stream: 2n bytes per cycle
-    xs = [2 ** e for e in range(-2, 12)]
-    roof = [min(peak, bw_gbs * x) for x in xs]
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.loglog(xs, roof, "k-", label=f"roofline (peak {peak:.1f} GOPS, {bw_gbs:.1f} GB/s in)")
-    for (lname, nn, p) in rows:
-        if nn == n:
-            ax.plot(p["intensity"], p["gops"], "o", label=lname)
-    ax.set_xlabel("arithmetic intensity (ops / byte)")
-    ax.set_ylabel("achieved GOPS")
-    ax.set_title(f"Roofline, {n}x{n} array @ {freq} MHz")
-    ax.grid(alpha=0.3, which="both")
-    ax.legend(fontsize=7)
-    fig.tight_layout()
-    fig.savefig(os.path.join(RESULTS, f"roofline_n{n}.png"), dpi=150)
-    print(f"Plots written to {os.path.abspath(RESULTS)}")
+def ideal_bytes(M: int, K: int, Nc: int) -> int:
+    """Lower bound on external traffic: every A and B element read once, C (32-bit) written once."""
+    return M * K + K * Nc + 4 * M * Nc
+
+
+def traffic_table(n: int):
+    """Interface traffic as built (each tile re-streams its operands) vs ideal operand reuse."""
+    print(f"\nExternal traffic, {n}x{n} array: as built vs ideal reuse (unbounded on-chip buffer)")
+    hdr = (f"{'layer':<18}{'streamed MB':>12}{'ideal MB':>10}{'reduction':>10}"
+           f"{'ops/B now':>10}{'ops/B ideal':>12}")
+    print(hdr)
+    print("-" * len(hdr))
+    for name, d in LAYERS.items():
+        tiles = math.ceil(d["M"] / n) * math.ceil(d["Nc"] / n)
+        built = tiles * (d["K"] * 2 * n + n * n * 4)
+        ideal = ideal_bytes(**d)
+        ops = 2 * d["M"] * d["K"] * d["Nc"]
+        print(f"{name:<18}{built / 1e6:>12.2f}{ideal / 1e6:>10.2f}{built / ideal:>9.1f}x"
+              f"{ops / built:>10.1f}{ops / ideal:>12.1f}")
 
 
 def validate():
@@ -143,13 +127,16 @@ def validate():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sizes", type=int, nargs="+", default=[4, 8, 16, 32])
-    ap.add_argument("--freq", type=float, default=200.0, help="clock in MHz")
+    ap.add_argument("--freq", type=float, default=187.6,
+                    help="clock in MHz (default: measured Fmax of the 8x8 PIPE=1 design, "
+                         "see README; larger arrays are assumed to run at the same clock)")
     ap.add_argument("--validate", action="store_true")
     args = ap.parse_args()
     if args.validate:
         validate()
         return
     rows = table(args.sizes, args.freq)
+    traffic_table(args.sizes[-1])
     plots(rows, args.sizes, args.freq)
 
 
