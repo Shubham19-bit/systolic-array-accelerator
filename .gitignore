@@ -13,3 +13,11 @@ synth/reports/
 # generated results (keep folder)
 results/*
 !results/.gitkeep
+sim_build_N*/
+results.xml
+__pycache__/
+*.vcd
+*.fst
+.venv/
+formal/sa_top_*/
+synth/reports/
