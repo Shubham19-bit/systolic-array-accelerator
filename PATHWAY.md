@@ -78,15 +78,15 @@ You must be able to explain every line. Read in this order:
 - [ ] Draw the 4×4 array on paper and trace one 2×2 example cycle by cycle.
       Check your trace with `make -C tb/cocotb WAVES=1` and open the waveform
       (WaveTrace in VS Code, or `gtkwave`).
-- [ ] Work out the **minimum drain length** on paper. The last beat needs N−1 skew
+- [x] Work out the **minimum drain length** on paper. The last beat needs N−1 skew
       cycles + N−1 hops to reach PE(N−1,N−1), so the minimum is **2(N−1)**; the starter
       uses 2N (2 cycles of margin). Confirm in the cycle model (`m.drain_cyc = 2*n - 2`),
       then change `DRAIN_CYC` in `sa_top.sv` to `(N > 1) ? 2*N-2 : 1` (N=1 still needs one cycle). Latency becomes **K + 3N − 2**, so
       update the latency test, `tile_cycles()` in `analysis/perf_model.py`, `sa_cycle_model.py`,
       README and CLAUDE.md. Good first "optimisation + keep everything consistent" exercise.
 - [ ] Explain why stalls are safe (single global `en`).
-- [ ] Run the size sweep: `make sweep` (N = 2, 4, 8).
-- [ ] Lint with Verilator: `verilator --lint-only -Wall rtl/*.sv --top-module sa_top`
+- [x] Run the size sweep: `make sweep` (N = 2, 4, 8).
+- [x] Lint with Verilator: `verilator --lint-only -Wall rtl/*.sv --top-module sa_top`
       and fix or justify each warning.
 
 ### Concepts to learn (interview-critical)
@@ -106,14 +106,14 @@ You must be able to explain every line. Read in this order:
 ## Week 2 - Verification depth
 
 ### Tasks
-- [ ] Add **functional coverage** that matters (extend `SaCoverage`):
+- [x] Add **functional coverage** that matters (extend `SaCoverage`):
       K bins, stall bins (# input bubbles per job), back-pressure bins, sign mix.
-- [ ] Add a **stall-pattern sequence**: valid toggling every cycle, long gaps, ready held
+- [x] Add a **stall-pattern sequence**: valid toggling every cycle, long gaps, ready held
       low for 50 cycles mid-output.
-- [ ] Add a **cycle-accurate check**: drive the same stimulus into
+- [x] Add a **cycle-accurate check**: drive the same stimulus into
       `model/sa_cycle_model.py` and compare `s_axis_tready` / `m_axis_tvalid` cycle by
       cycle (not just final results).
-- [ ] Bug-injection exercise: change one thing in the RTL (e.g. skew lane 2 delay = 1,
+- [x] Bug-injection exercise: change one thing in the RTL (e.g. skew lane 2 delay = 1,
       or `acc` width 16) and confirm the tests catch it. Note which test caught it.
 - [ ] Optional: port the pyuvm bench to **SystemVerilog UVM** on
       [EDA Playground](https://www.edaplayground.com) (free account → Synopsys VCS /

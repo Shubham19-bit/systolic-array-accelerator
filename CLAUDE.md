@@ -28,6 +28,8 @@ it in an interview. Prefer small, reviewable diffs over large rewrites.
 | waveforms | `make -C tb/cocotb WAVES=1` |
 | Verilator instead of Icarus | `make -C tb/cocotb SIM=verilator` |
 | pyuvm regression | `make uvm` |
+| coverage closure (N=2,4,8) | `make cov` |
+| bug-injection check | `make bugs` (writes docs/bug_injection.md) |
 | formal | `make formal` |
 | synthesis (+timing) | `make synth` |
 | performance model | `make perf` |

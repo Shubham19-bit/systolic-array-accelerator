@@ -58,7 +58,8 @@ tb/cocotb/      test_sa_top.py      directed + random + stall/back-pressure test
 tb/pyuvm/       test_sa_pyuvm.py    UVM-style env: agent, driver, monitor, scoreboard, coverage
 formal/         sa_top.sby          SymbiYosys prove + cover
 synth/          run_synth.sh, sta.tcl   Yosys synthesis sweep + OpenSTA timing
-analysis/       perf_model.py, summarize_synth.py
+analysis/       perf_model.py, summarize_synth.py, merge_coverage.py, bug_injection.py
+docs/           bug_injection.md    which test catches which injected RTL bug
 setup/          install_tools.sh, check_tools.sh
 ```
 
@@ -72,17 +73,35 @@ make model                           # cycle-model self-test (numpy only)
 make test                            # cocotb regression, N=4
 make sweep                           # N = 2, 4, 8
 make uvm                             # pyuvm regression
+make cov                             # pyuvm at N = 2, 4, 8 + merged coverage closure check
+make bugs                            # bug-injection check of the testbenches
 make formal                          # SymbiYosys
 make synth                           # Yosys (+ OpenSTA if $LIB is set)
 make perf                            # performance model + plots in results/
 ```
 
+## Verification
+
+| Layer | What it checks |
+|---|---|
+| cocotb (7 tests) | identity, K=1, extreme values, 50 back-to-back jobs with the exact latency `K + DRAIN + N`, random bubbles + back-pressure, reset mid-job |
+| cycle-accurate lockstep | `test_cycle_accurate_vs_model` compares `tready`, `tvalid`, `tlast`, `last_job_cycles` and `tdata` with `model/sa_cycle_model.py` on **every clock cycle**, with garbage on `tdata`/`tlast` while `tvalid` is low |
+| pyuvm (3 tests) | agent / driver / monitor / scoreboard against a NumPy golden model: random + corner, random stalls, and directed stall patterns (valid toggling every cycle, long gaps, `tready` held low 8 / 30 / 50 cycles mid-output) |
+| functional coverage | 27 bins (K, K vs N, operand extremes, sign mix, input bubbles per job, back-pressure cycles per job, stall patterns), merged over the tests by `make cov`; closure is checked per N |
+| bug injection | 11 one-line RTL mutations, all caught - see [docs/bug_injection.md](docs/bug_injection.md) |
+
+All of it passes for N = 2, 4, 8. Two examples of why the layers are needed: a DRAIN that is one
+cycle too long is functionally correct and only a latency check or the lockstep test sees it;
+`tready` high during DRAIN is invisible to the cocotb tests (they send the next job only after
+the previous one has finished) and is caught by the lockstep test and by the pyuvm driver, which
+overlaps jobs.
+
 ## Results
 
 | N | Tests | Cells | Area (µm², sky130) | Fmax (MHz) | Peak GOPS @ Fmax |
 |---|---|---|---|---|---|
-| 2 | _todo_ | _todo_ | _todo_ | _todo_ | _todo_ |
-| 4 | _todo_ | _todo_ | _todo_ | _todo_ | _todo_ |
-| 8 | _todo_ | _todo_ | _todo_ | _todo_ | _todo_ |
+| 2 | 7 cocotb + 3 pyuvm, all pass | _todo_ | _todo_ | _todo_ | _todo_ |
+| 4 | 7 cocotb + 3 pyuvm, all pass | _todo_ | _todo_ | _todo_ | _todo_ |
+| 8 | 7 cocotb + 3 pyuvm, all pass | _todo_ | _todo_ | _todo_ | _todo_ |
 
 _Fill this table in week 3–4 (see PATHWAY.md)._

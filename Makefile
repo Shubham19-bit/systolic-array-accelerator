@@ -4,6 +4,8 @@
 #   make test       -> cocotb regression (Icarus, N=4)    make test N=8
 #   make sweep      -> cocotb regression for N = 2, 4, 8
 #   make uvm        -> pyuvm UVM-style regression
+#   make cov        -> pyuvm regression for N = 2, 4, 8 + merged functional-coverage closure
+#   make bugs       -> bug-injection check of the testbenches (writes docs/bug_injection.md)
 #   make formal     -> SymbiYosys proof + cover
 #   make synth      -> Yosys synthesis sweep (+ OpenSTA if LIB is set)
 #   make perf       -> analytical model, plots, and model-vs-RTL validation
@@ -13,7 +15,7 @@ N ?= 4
 # The OSS CAD Suite's Python 3.11: ~/sa-pylibs (numpy, cocotb 1.9.2, ...) is built for it,
 # not for Ubuntu's python3 (3.10).  See CLAUDE.md "Environment".
 PY ?= tabbypy3
-.PHONY: check model test sweep uvm formal synth perf all clean
+.PHONY: check model test sweep uvm cov bugs formal synth perf all clean
 
 check:
 	@bash setup/check_tools.sh
@@ -29,6 +31,14 @@ sweep:
 
 uvm:
 	$(MAKE) -C tb/pyuvm N=$(N)
+
+cov:
+	rm -f results/cov_*.json
+	$(MAKE) -C tb/pyuvm sweep
+	$(PY) analysis/merge_coverage.py
+
+bugs:
+	$(PY) analysis/bug_injection.py
 
 formal:
 	cd formal && sby -f sa_top.sby
