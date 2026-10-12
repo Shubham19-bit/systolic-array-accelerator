@@ -61,11 +61,11 @@ If anything fails, give Claude Code this prompt:
 > testbench, explain it to me, and propose the smallest fix. Do not weaken any check."*
 
 **DoD Week 0**
-- [ ] `make check` shows iverilog, yosys, cocotb, pyuvm installed
-- [ ] `make model` passes
-- [ ] `make test` passes (6 cocotb tests, N=4)
-- [ ] `make uvm` passes (2 pyuvm tests)
-- [ ] Project pushed to a **public GitHub repo**
+- [x] `make check` shows iverilog, yosys, cocotb, pyuvm installed
+- [x] `make model` passes
+- [x] `make test` passes (6 cocotb tests, N=4)
+- [x] `make uvm` passes (2 pyuvm tests)
+- [x] Project pushed to a **public GitHub repo** (verify it is public and shows files)
 
 ---
 
