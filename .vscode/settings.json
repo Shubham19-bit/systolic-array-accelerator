@@ -1,0 +1,7 @@
+{
+  "files.associations": { "*.sv": "systemverilog", "*.sby": "ini" },
+  "verilog.linting.linter": "verilator",
+  "verilog.linting.verilator.arguments": "-Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Irtl",
+  "python.analysis.extraPaths": ["tb/common", "model"],
+  "editor.rulers": [100]
+}

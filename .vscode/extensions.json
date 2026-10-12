@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-vscode-remote.remote-wsl",
+    "teros-technology.teroshdl",
+    "mshr-h.veriloghdl",
+    "ms-python.python",
+    "wavetrace.wavetrace",
+    "eamodio.gitlens"
+  ]
+}

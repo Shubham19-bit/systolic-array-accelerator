@@ -1,0 +1,7 @@
+# Python dependencies (install inside WSL Ubuntu):
+#   python3 -m pip install -r requirements.txt
+cocotb==1.9.2        # testbench framework (APIs used here are cocotb 1.9-style)
+pyuvm==3.0.0         # UVM in Python, runs on cocotb
+numpy>=1.24          # golden reference model
+matplotlib>=3.7      # performance plots
+pytest>=7.0          # optional: cocotb runner / unit tests

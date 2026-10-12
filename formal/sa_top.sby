@@ -1,0 +1,35 @@
+# SymbiYosys formal verification for sa_top (N = 2 to keep the proof small)
+#
+#   cd formal
+#   sby -f sa_top.sby            # runs both tasks
+#   sby -f sa_top.sby prove      # k-induction proof of the assertions
+#   sby -f sa_top.sby cover      # find a trace that completes a full job
+#
+# Properties live in rtl/sa_top.sv inside `ifdef FORMAL.
+
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 24
+cover: mode cover
+cover: depth 40
+
+[engines]
+smtbmc
+
+[script]
+read_verilog -sv -formal -DFORMAL pe.sv
+read_verilog -sv -formal -DFORMAL skew_buffer.sv
+read_verilog -sv -formal -DFORMAL systolic_array.sv
+read_verilog -sv -formal -DFORMAL sa_top.sv
+chparam -set N 2 -set CW 8 sa_top
+prep -top sa_top
+
+[files]
+../rtl/pe.sv
+../rtl/skew_buffer.sv
+../rtl/systolic_array.sv
+../rtl/sa_top.sv

@@ -1,0 +1,15 @@
+# simulation
+sim_build*/
+results.xml
+*.vcd
+*.fst
+*.ghw
+__pycache__/
+*.pyc
+# formal
+formal/sa_top_*/
+# synthesis
+synth/reports/
+# generated results (keep folder)
+results/*
+!results/.gitkeep
