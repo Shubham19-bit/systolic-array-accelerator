@@ -29,8 +29,12 @@ module systolic_array #(
     //      unused output of the last PE in each row.
     // b_v: B operand entering PE(i,j) at index (i*N + j). Row N is the unused
     //      output of the last PE in each column.
+    // The edge slots (a_h column N, b_v row N) are the last PE's outputs and are
+    // intentionally unconnected, so lint is told not to flag them.
+    /* verilator lint_off UNUSEDSIGNAL */
     wire [N*(N+1)*DW-1:0] a_h;
     wire [(N+1)*N*DW-1:0] b_v;
+    /* verilator lint_on UNUSEDSIGNAL */
 
     genvar i, j;
     generate

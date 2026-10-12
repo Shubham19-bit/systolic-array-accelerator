@@ -57,8 +57,8 @@ module sa_top #(
     localparam int DCW       = $clog2(DRAIN_CYC + 1);
     localparam int RCW       = (N > 1) ? $clog2(N) : 1;
 
-    localparam logic [DCW-1:0] DRAIN_LAST = DRAIN_CYC - 1;
-    localparam logic [RCW-1:0] ROW_LAST   = N - 1;
+    localparam logic [DCW-1:0] DRAIN_LAST = DCW'(DRAIN_CYC - 1);
+    localparam logic [RCW-1:0] ROW_LAST   = RCW'(N - 1);
 
     // FSM encoding (plain localparams for maximum tool portability)
     localparam logic [1:0] S_CLEAR  = 2'd0;
