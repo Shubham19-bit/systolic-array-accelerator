@@ -195,9 +195,9 @@ before/after result for the PE pipelining.
 ## Stretch (weeks 5–6) - pick 1 or 2
 - [ ] **Weight-stationary variant** and a comparison table vs output-stationary
       (utilization, bandwidth, area). Directly relevant to GPU/TPU architecture interviews.
-- [ ] **Integrate your AXI4-Stream quantization block** on the output: INT32 → ReLU → INT8.
+- [x] **Integrate your AXI4-Stream quantization block** on the output: INT32 → ReLU → INT8.
       Turns this into a real "layer engine".
-- [ ] **Tiling controller + SRAM buffers**: compute an M×K×Nc GEMM bigger than N×N by
+- [x] **Tiling controller + SRAM buffers**: compute an M×K×Nc GEMM bigger than N×N by
       looping over tiles in hardware, and reuse B tiles from on-chip memory.
 - [ ] **OpenLane → GDS** on sky130: full place & route, report area/WNS/power.
 - [ ] **C++ performance model** (cycle-level, mirrors the Python model) - bridges to the
@@ -212,7 +212,7 @@ before/after result for the PE pipelining.
   ResNet-18 conv layers (8x8 array, modelled).
 - Verified with a **pyuvm environment** (driver, monitor, scoreboard, coverage) and
   **200+ constrained-random and directed jobs per array size** under random
-  back-pressure, 27 coverage bins closed, and 12/12 injected RTL bugs caught; proved 7 handshake/FSM
+  back-pressure, 27 coverage bins closed, and 36/36 injected RTL bugs caught; proved handshake/FSM
   properties with **SymbiYosys k-induction**.
 - Synthesized on **SkyWater 130 nm**: **385,388 µm²** and **187.6 MHz** for 8×8; pipelining
   the PE raised Fmax by **94 %** (96.5 → 187.6 MHz).

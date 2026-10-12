@@ -16,6 +16,7 @@
 #
 # Other knobs:  PIPE=0|1 (PE product register, default 1)   REPORT_DIR=<dir>
 #               ABC_AREA=1 (minimum-size mapping, for a pure area comparison)
+#               TOP=sa_top|sa_layer|quant_relu (module to synthesize)
 # LIB and sta are auto-detected in ~/tools/mm/env (micromamba env with the sky130 PDK
 # and OpenSTA, see PATHWAY.md week 3) when they are not already set / on PATH.
 set -euo pipefail
@@ -26,6 +27,7 @@ OUT="${REPORT_DIR:-$HERE/reports}"
 SIZES="${SIZES:-2 4 8}"
 CLK_PERIOD="${CLK_PERIOD:-10}"
 PIPE="${PIPE:-1}"
+QSTAGES="${QSTAGES:-1}"                   # quantizer pipeline registers (quant_relu, sa_layer)
 D_PS="$(awk "BEGIN{printf \"%d\", $CLK_PERIOD*1000}")"     # ABC delay target in ps
 mkdir -p "$OUT"
 
@@ -35,7 +37,8 @@ if [[ -z "${LIB:-}" && -f "$DEFAULT_LIB" ]]; then LIB="$DEFAULT_LIB"; fi
 STA="$(command -v sta || true)"
 if [[ -z "$STA" && -x "$MM_ENV/bin/sta" ]]; then STA="$MM_ENV/bin/sta"; fi
 
-SRCS="$RTL/pe.sv $RTL/skew_buffer.sv $RTL/systolic_array.sv $RTL/sa_top.sv"
+SRCS="$RTL/pe.sv $RTL/skew_buffer.sv $RTL/systolic_array.sv $RTL/sa_top.sv $RTL/quant_relu.sv $RTL/sa_layer.sv"
+TOP="${TOP:-sa_top}"                     # sa_top | sa_layer | quant_relu
 
 # lpflow_* cells (low-power-flow variants) are excluded, as in the sky130 reference flows.
 # Default: timing-driven mapping with fan-out buffering and sizing (synth/abc_speed.script).
@@ -47,12 +50,18 @@ else
 fi
 
 for N in $SIZES; do
-  echo "=== Synthesizing sa_top N=$N PIPE=$PIPE ==="
+  echo "=== Synthesizing $TOP N=$N PIPE=$PIPE ==="
+  # parameters differ per top
+  case "$TOP" in
+    quant_relu) PARAMS="-set N $N -set STAGES $QSTAGES" ;;
+    sa_layer)   PARAMS="-set N $N -set PIPE $PIPE -set QSTAGES $QSTAGES" ;;
+    *)          PARAMS="-set N $N -set PIPE $PIPE" ;;
+  esac
   if [[ -n "${LIB:-}" ]]; then
     yosys -q -l "$OUT/yosys_N${N}.log" -p "
       read_verilog -sv $SRCS
-      chparam -set N $N -set PIPE $PIPE sa_top
-      synth -top sa_top -flatten
+      chparam $PARAMS $TOP
+      synth -top $TOP -flatten
       dfflibmap -liberty $LIB -dont_use sky130_fd_sc_hd__lpflow_*
       $ABC_CMD
       opt_clean -purge
@@ -63,7 +72,7 @@ for N in $SIZES; do
     sed -i 's/\bwire signed /wire /' "$OUT/sa_top_N${N}_netlist.v"
     if [[ -n "$STA" ]]; then
       echo "--- OpenSTA timing (period ${CLK_PERIOD} ns) ---"
-      LIB="$LIB" NETLIST="$OUT/sa_top_N${N}_netlist.v" CLK_PERIOD="$CLK_PERIOD" \
+      LIB="$LIB" NETLIST="$OUT/sa_top_N${N}_netlist.v" CLK_PERIOD="$CLK_PERIOD" TOP="$TOP" \
         "$STA" -no_splash -exit "$HERE/sta.tcl" | tee "$OUT/timing_N${N}.rpt"
     else
       echo "OpenSTA ('sta') not found - skipping timing. See PATHWAY.md week 3."
@@ -71,8 +80,8 @@ for N in $SIZES; do
   else
     yosys -q -l "$OUT/yosys_N${N}.log" -p "
       read_verilog -sv $SRCS
-      chparam -set N $N -set PIPE $PIPE sa_top
-      synth -top sa_top -flatten
+      chparam $PARAMS $TOP
+      synth -top $TOP -flatten
       tee -o $OUT/stat_generic_N${N}.rpt stat
     "
   fi

@@ -4,6 +4,9 @@
 #   make test       -> cocotb regression (Icarus, N=4)    make test N=8
 #   make sweep      -> cocotb regression for N = 2, 4, 8
 #   make uvm        -> pyuvm UVM-style regression
+#   make quant      -> INT32->ReLU->INT8 requantization stage: cocotb tests
+#   make layer      -> GEMM + requantization (sa_layer): cocotb tests
+#   make gemm       -> tiled GEMM with on-chip operand buffers (sa_gemm): cocotb tests
 #   make cov        -> pyuvm regression for N = 2, 4, 8 + merged functional-coverage closure
 #   make bugs       -> bug-injection check of the testbenches (writes docs/bug_injection.md)
 #   make formal     -> SymbiYosys proof + cover
@@ -18,7 +21,7 @@ N ?= 4
 PY ?= tabbypy3
 # Clock for `make perf` (MHz): measured Fmax of the 8x8 PIPE=1 design (see README).
 FREQ ?= 187.6
-.PHONY: check model test sweep uvm cov bugs formal synth fmax perf all clean
+.PHONY: check model test sweep uvm quant layer gemm cov bugs formal synth fmax perf all clean
 
 check:
 	@bash setup/check_tools.sh
@@ -35,6 +38,15 @@ sweep:
 uvm:
 	$(MAKE) -C tb/pyuvm N=$(N)
 
+quant:            # all pipeline depths: 1 (default), 2, 3
+	for q in 1 2 3; do $(MAKE) -C tb/cocotb TOP=quant_relu MODULE=test_quant N=$(N) QSTAGES=$$q || exit 1; done
+
+layer:
+	for q in 1 2 3; do $(MAKE) -C tb/cocotb TOP=sa_layer MODULE=test_sa_layer N=$(N) QSTAGES=$$q || exit 1; done
+
+gemm:
+	$(MAKE) -C tb/cocotb TOP=sa_gemm MODULE=test_sa_gemm N=$(N)
+
 cov:
 	rm -f results/cov_*.json
 	$(MAKE) -C tb/pyuvm sweep
@@ -44,7 +56,7 @@ bugs:
 	$(PY) analysis/bug_injection.py
 
 formal:
-	cd formal && sby -f sa_top.sby
+	cd formal && sby -f sa_top.sby && sby -f quant_relu.sby && sby -f sa_gemm.sby
 
 synth:
 	bash synth/run_synth.sh

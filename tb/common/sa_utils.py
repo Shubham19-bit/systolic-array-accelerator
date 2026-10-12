@@ -26,6 +26,17 @@ def pipe_param():
     return int(os.environ.get("SA_PIPE", "1"))
 
 
+def qstages_param() -> int:
+    """Pipeline registers of the requantization stage (exported as SA_QSTAGES)."""
+    return int(os.environ.get("SA_QSTAGES", "1"))
+
+
+def gemm_params():
+    """Buffer capacity of sa_gemm from the Makefile: (MAXK, MAXMB, MAXNB)."""
+    return (int(os.environ.get("SA_MAXK", "64")), int(os.environ.get("SA_MAXMB", "4")),
+            int(os.environ.get("SA_MAXNB", "4")))
+
+
 def drain_cycles(n: int, pipe: int) -> int:
     """DRAIN length of sa_top: minimum 2N-2 (1 for N=1), +1 if the PE is pipelined."""
     return (2 * n - 2 if n > 1 else 1) + pipe
@@ -63,6 +74,32 @@ def golden(A: np.ndarray, B: np.ndarray) -> np.ndarray:
     return np.where(C >= (m >> 1), C - m, C)
 
 
+def quantize(C: np.ndarray, shift: int, relu: bool) -> np.ndarray:
+    """Golden model of rtl/quant_relu.sv: [ReLU] -> round-half-up >> shift -> saturate to INT8.
+
+    ReLU is applied first, then 2^(shift-1) is added and the value is shifted right
+    arithmetically (floor), then clamped to [-128, 127]."""
+    x = C.astype(np.int64)
+    if relu:
+        x = np.maximum(x, 0)
+    if shift:
+        x = (x + (1 << (shift - 1))) >> shift
+    return np.clip(x, -(1 << (DW - 1)), (1 << (DW - 1)) - 1)
+
+
+def unpack_row8(word: int, n: int):
+    """N signed INT8 lanes of one quantized output beat."""
+    return [to_signed(word >> (j * DW), DW) for j in range(n)]
+
+
+def pack_row32(vals) -> int:
+    """N signed 32-bit accumulators in one input beat of quant_relu."""
+    word = 0
+    for i, v in enumerate(vals):
+        word |= to_unsigned(v, AW) << (i * AW)
+    return word
+
+
 # ------------------------------------------------------------- DUT utilities
 async def start_clock_and_reset(dut, period_ns: int = 10, cycles: int = 5):
     """Start the clock (call once per test) and apply reset."""
@@ -74,10 +111,9 @@ async def start_clock_and_reset(dut, period_ns: int = 10, cycles: int = 5):
 async def reset_dut(dut, cycles: int = 5):
     """Apply an active-low reset for `cycles` clocks and idle all inputs."""
     dut.rst_n.value = 0
-    dut.s_axis_tvalid.value = 0
-    dut.s_axis_tdata.value = 0
-    dut.s_axis_tlast.value = 0
-    dut.m_axis_tready.value = 0
+    for name in ("s_axis_tvalid", "s_axis_tdata", "s_axis_tlast", "m_axis_tready"):
+        if hasattr(dut, name):          # sa_gemm has no s_axis port (operands come from memories)
+            getattr(dut, name).value = 0
     for _ in range(cycles):
         await RisingEdge(dut.clk)
     dut.rst_n.value = 1

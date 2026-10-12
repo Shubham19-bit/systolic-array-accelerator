@@ -11,7 +11,7 @@
 
 read_liberty $::env(LIB)
 read_verilog $::env(NETLIST)
-link_design sa_top
+link_design $::env(TOP)
 
 create_clock -name clk -period $::env(CLK_PERIOD) [get_ports clk]
 set data_inputs [delete_from_list [all_inputs] [get_ports {clk rst_n}]]

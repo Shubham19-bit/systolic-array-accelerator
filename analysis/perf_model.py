@@ -15,6 +15,7 @@ Usage:
   python analysis/perf_model.py                      # table + plots for CNN layers
   python analysis/perf_model.py --freq 187.6 --sizes 4 8 16 32
   python analysis/perf_model.py --validate           # compare with results/sim_cycles_N*.json
+                                                     # (tiles) and sim_gemm_N*.json (whole GEMMs)
 """
 from __future__ import annotations
 
@@ -43,6 +44,16 @@ LAYERS = {
 def tile_cycles(n: int, K: int, pipe: int = 1) -> int:
     drain = (2 * n - 2 if n > 1 else 1) + pipe    # +1: pipelined PE adds its product late
     return K + drain + n + 1
+
+
+GEMM_STARTUP = 1    # sa_gemm: first beat is accepted 3 cycles after start; see rtl/sa_gemm.sv
+
+
+def gemm_cycles(n: int, M: int, K: int, Nc: int, pipe: int = 1) -> int:
+    """Exact cycle count of rtl/sa_gemm.sv for a whole GEMM with no stalls: back-to-back tiles
+    (the next tile's first beats are prefetched while the current one drains) plus the startup."""
+    tiles = math.ceil(M / n) * math.ceil(Nc / n)
+    return tiles * tile_cycles(n, K, pipe) + GEMM_STARTUP
 
 
 def gemm_perf(n: int, M: int, K: int, Nc: int, freq_mhz: float) -> dict:
@@ -93,9 +104,10 @@ def ideal_bytes(M: int, K: int, Nc: int) -> int:
 
 def traffic_table(n: int):
     """Interface traffic as built (each tile re-streams its operands) vs ideal operand reuse."""
-    print(f"\nExternal traffic, {n}x{n} array: as built vs ideal reuse (unbounded on-chip buffer)")
+    print(f"\nExternal traffic, {n}x{n} array: sa_top (re-streams every tile) vs ideal reuse "
+          f"(what sa_gemm approaches with an unbounded on-chip buffer)")
     hdr = (f"{'layer':<18}{'streamed MB':>12}{'ideal MB':>10}{'reduction':>10}"
-           f"{'ops/B now':>10}{'ops/B ideal':>12}")
+           f"{'ops/B now':>10}{'ops/B ideal':>12}{'B/cyc now':>10}{'B/cyc ideal':>12}")
     print(hdr)
     print("-" * len(hdr))
     for name, d in LAYERS.items():
@@ -103,8 +115,10 @@ def traffic_table(n: int):
         built = tiles * (d["K"] * 2 * n + n * n * 4)
         ideal = ideal_bytes(**d)
         ops = 2 * d["M"] * d["K"] * d["Nc"]
+        cycles = tiles * tile_cycles(n, d["K"])
         print(f"{name:<18}{built / 1e6:>12.2f}{ideal / 1e6:>10.2f}{built / ideal:>9.1f}x"
-              f"{ops / built:>10.1f}{ops / ideal:>12.1f}")
+              f"{ops / built:>10.1f}{ops / ideal:>12.1f}"
+              f"{built / cycles:>10.1f}{ideal / cycles:>12.1f}")
 
 
 def validate():
@@ -121,6 +135,15 @@ def validate():
                 ok = False
                 print(f"MISMATCH N={d['N']} K={d['K']}: model {pred}, RTL {d['cycles']}")
         print(f"{os.path.basename(f)}: {len(data)} jobs checked")
+    for f in sorted(glob.glob(os.path.join(RESULTS, "sim_gemm_N*.json"))):    # whole GEMMs
+        data = json.load(open(f))
+        for d in data:
+            pred = gemm_cycles(d["N"], d["M"], d["K"], d["Nc"], d.get("pipe", 1))
+            if pred != d["cycles"]:
+                ok = False
+                print(f"MISMATCH GEMM N={d['N']} M={d['M']} K={d['K']} Nc={d['Nc']}: "
+                      f"model {pred}, RTL {d['cycles']}")
+        print(f"{os.path.basename(f)}: {len(data)} whole-GEMM runs checked")
     print("Model matches RTL cycle counts." if ok else "Model/RTL mismatch - investigate!")
 
 

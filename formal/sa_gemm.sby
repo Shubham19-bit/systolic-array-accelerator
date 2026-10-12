@@ -1,0 +1,41 @@
+# SymbiYosys formal verification for sa_gemm (tiny buffers: N=2, MAXK=3, 2x2 blocks)
+#
+#   cd formal
+#   sby -f sa_gemm.sby              # runs both tasks
+#
+# Properties live in rtl/sa_gemm.sv inside `ifdef FORMAL: FIFO never overflows, address
+# pointers equal ib*K / jb*K and stay inside the buffers, tile counters stay in range, done
+# follows exactly the last-row handshake, output stable under back-pressure, start ignored
+# while busy. sa_top and the memories are read WITHOUT -DFORMAL (sa_top is proved in
+# sa_top.sby; its own assumptions would constrain the controller's FIFO).
+
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 30
+cover: mode cover
+cover: depth 40
+
+[engines]
+smtbmc
+
+[script]
+read_verilog -sv -formal pe.sv
+read_verilog -sv -formal skew_buffer.sv
+read_verilog -sv -formal systolic_array.sv
+read_verilog -sv -formal sa_top.sv
+read_verilog -sv -formal sram_sp.sv
+read_verilog -sv -formal -DFORMAL sa_gemm.sv
+chparam -set N 2 -set CW 8 -set MAXK 3 -set MAXMB 2 -set MAXNB 2 sa_gemm
+prep -top sa_gemm
+
+[files]
+../rtl/pe.sv
+../rtl/skew_buffer.sv
+../rtl/systolic_array.sv
+../rtl/sa_top.sv
+../rtl/sram_sp.sv
+../rtl/sa_gemm.sv

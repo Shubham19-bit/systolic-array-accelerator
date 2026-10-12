@@ -6,7 +6,7 @@ checked with **formal properties (SymbiYosys)**, synthesized with **Yosys** on t
 **SkyWater 130 nm** library, and analysed with a **cycle-accurate model** and a
 **roofline performance model**.
 
-> Status: RTL, verification, formal proof, synthesis/timing and performance analysis are done (see [`PATHWAY.md`](PATHWAY.md)); the stretch goals are open.
+> Status: RTL, verification, formal proof, synthesis/timing and performance analysis are done, plus two stretch goals: an INT32 → ReLU → INT8 requantization stage and a tiled GEMM engine with on-chip operand buffers (see [`PATHWAY.md`](PATHWAY.md)). Weight-stationary, OpenLane and a C++ model are open.
 
 ---
 
@@ -84,11 +84,14 @@ Latency without stalls: **K + DRAIN + N cycles**: K + 3N - 1 with the pipelined 
 
 ```
 rtl/            pe.sv, skew_buffer.sv, systolic_array.sv, sa_top.sv (+ formal props)
+                quant_relu.sv, sa_layer.sv      requantization stage, GEMM + requantization
+                sram_sp.sv, sa_gemm.sv          operand memory, tiled GEMM engine
 model/          sa_cycle_model.py   cycle-accurate Python mirror of the RTL
 tb/common/      sa_utils.py         packing, golden model, AXI-Stream driver/monitor
-tb/cocotb/      test_sa_top.py      directed + random + stall/back-pressure tests
+tb/cocotb/      test_sa_top.py      directed + random + stall/back-pressure tests + cycle-accurate lockstep
+                test_quant.py, test_sa_layer.py, test_sa_gemm.py   the stretch modules
 tb/pyuvm/       test_sa_pyuvm.py    UVM-style env: agent, driver, monitor, scoreboard, coverage
-formal/         sa_top.sby          SymbiYosys prove + cover
+formal/         sa_top.sby, quant_relu.sby, sa_gemm.sby   SymbiYosys prove + cover
 synth/          run_synth.sh, sweep_fmax.sh, area_breakdown.sh, sta.tcl, abc_speed.script
                                     Yosys synthesis (sky130) + OpenSTA timing
 analysis/       perf_model.py, summarize_synth.py, merge_coverage.py, bug_injection.py
@@ -107,6 +110,9 @@ make test                            # cocotb regression, N=4
 make sweep                           # N = 2, 4, 8
 make uvm                             # pyuvm regression
 make cov                             # pyuvm at N = 2, 4, 8 + merged coverage closure check
+make quant                           # requantization stage, QSTAGES = 1, 2, 3
+make layer                           # GEMM + requantization, QSTAGES = 1, 2, 3
+make gemm                            # tiled GEMM with on-chip buffers (MAXK= MAXMB= MAXNB=)
 make bugs                            # bug-injection check of the testbenches
 make formal                          # SymbiYosys
 make synth                           # Yosys + sky130 + OpenSTA (PIPE=0|1, CLK_PERIOD=<ns>)
@@ -123,7 +129,7 @@ make perf                            # performance model + plots in results/
 | pyuvm (3 tests) | agent / driver / monitor / scoreboard against a NumPy golden model: random + corner, random stalls, and directed stall patterns (valid toggling every cycle, long gaps, `tready` held low 8 / 30 / 50 cycles mid-output) |
 | functional coverage | 27 bins (K, K vs N, operand extremes, sign mix, input bubbles per job, back-pressure cycles per job, stall patterns), merged over the tests by `make cov`; closure is checked per N |
 | formal (SymbiYosys) | 7 properties proved by k-induction (AXI-Stream output stability, no input while producing output, `tlast` framing, row index range, FSM returns to CLEAR, accumulators frozen when stalled, `tready` low during DRAIN); a cover trace completes a job |
-| bug injection | 12 one-line RTL mutations, all caught - see [docs/bug_injection.md](docs/bug_injection.md) |
+| bug injection | 36 one-line RTL mutations (12 array, 10 quantizer, 3 layer, 11 tiled GEMM), all caught - see [docs/bug_injection.md](docs/bug_injection.md) |
 
 All of it passes for N = 2, 4, 8. Two examples of why the layers are needed: a DRAIN that is one
 cycle too long is functionally correct and only a latency check or the lockstep test sees it;
@@ -254,5 +260,120 @@ buffer (every operand read once, C written once), 32x32 array:
 
 Every layer except `fc` would move to the right of the knee (32 ops/byte), i.e. become compute-bound.
 This is an upper bound: a real buffer is finite, and a weight-stationary array pays weight-load cycles
-(normally hidden with double buffering) that this model does not count. Neither the buffer nor the
-weight-stationary variant is implemented here (see the stretch goals in `PATHWAY.md`).
+(normally hidden with double buffering) that this model does not count. A buffered version is implemented in
+`sa_gemm` (next sections); the weight-stationary variant is not.
+
+## Layer engine: INT32 → ReLU → INT8 (`quant_relu`, `sa_layer`)
+
+`quant_relu` is an AXI4-Stream stage behind `sa_top`: each beat is a row of N 32-bit accumulators in, N INT8
+values out, with
+
+```
+y = saturate_to_[-128,127]( floor( (relu(x) + 2^(shift-1)) / 2^shift ) )      cfg_shift 0..31, cfg_relu 0/1
+```
+
+`sa_layer` is `sa_top` + `quant_relu`; its latency is `sa_top`'s plus `QSTAGES` cycles, with unchanged throughput.
+
+**A timing lesson (same as the PE pipelining).** The first version computed `x + 2^(shift-1)` with a 33-bit adder,
+then a variable shifter, then a compare. Synthesized, the layer engine ran at **81 MHz** (N=4, 82 MHz at N=8) against 194 /
+188 MHz for the array alone, because the stage sits behind the row-select mux of the accumulators and the
+rounding adder is in series with it. Three pipeline stages only got it to 122 / 97 MHz. The fix was algebra, not
+registers: `floor((v + 2^(s-1)) / 2^s) = floor(v / 2^s) + v[s-1]`, i.e. rounding is a carry-in of one bit. The
+datapath now shifts `{v, 0}` once (the extra LSB becomes the round bit), decides saturation from the upper bits, and
+only needs an **8-bit** increment. Result (sky130, OpenSTA, ideal I/O, 5 ns target):
+
+| Pipeline registers (`QSTAGES`) | `quant_relu` area N=4 / 8 (µm²) | stage alone, input→reg (MHz) | `sa_layer` Fmax N=4 / 8 (MHz) | `sa_layer` area N=4 / 8 (µm²) |
+|---|---|---|---|---|
+| 1 (default) | 11,083 / 21,712 | 308 / 288 | 185 / 184 | 104,740 / 402,430 |
+| 2 | 14,529 / 28,729 | 542 / 510 | 191 / 190 | 109,465 / 411,492 |
+| 3 | 16,087 / 31,859 | 533 / 493 | 186 / 189 | 111,120 / 414,197 |
+| `sa_top` alone (reference) | - | - | 194 / 188 | 96,545 / 385,388 |
+
+With one register the layer engine is already at the array's own Fmax; extra stages cost 2-6 % of the layer engine's area and buy nothing
+measurable (the differences between rows are within the mapping noise), so `QSTAGES=1` is the default and 2-3 stay as
+tested options. The quantizer adds 8.5 % area at N=4 and 4.4 % at N=8.
+
+**Verification.**
+* `test_quant.py` (4 tests, run at every `QSTAGES`): all 32 shifts x ReLU on/off with INT32 extremes, exact rounding
+  ties and saturation boundaries plus random values (12 coverage bins, all hit); random back-pressure with a per-cycle check that the
+  output holds while stalled; exact latency (`QSTAGES` cycles) and one beat per cycle; a configuration change right after the
+  last beat was accepted must not affect beats still in the pipeline. `test_sa_layer.py` (4 tests) checks the integration end to end against
+  `golden()` + `quantize()`, including saturation, stalls through both stages, and latency `K + DRAIN + N + QSTAGES`.
+* Formal (`formal/quant_relu.sby`, k-induction): the lane function is proved for **every** 32-bit input and every shift
+  against an independent 64-bit specification (`y*2^s <= relu(x) + 2^(s-1) < (y+1)*2^s` for unsaturated `y`), plus ReLU, identity,
+  saturation and output stability under back-pressure. Because that specification shares nothing with the datapath, it also
+  proved the algebraic rewrite above equivalent to the old datapath. Pipeline registers only move these values; that part
+  is covered by simulation, not proven.
+* Bug injection: 10 quantizer mutations and 3 integration mutations, all caught. For example the high-saturation threshold off by
+  one (`sh = 127` plus a round bit wraps to -128) is caught *only* by the hand-built boundary vectors, never by random data.
+
+## Tiled GEMM with on-chip operand buffers (`sa_gemm`)
+
+`sa_top` computes one N x N tile and re-streams both operands for every tile. `sa_gemm` computes
+`C[M x Nc] = A[M x K] * B[K x Nc]` for any M, Nc (zero-padded to multiples of N) by looping over tiles in hardware, with
+A and B held in two on-chip memories that are **written once** and read locally by every tile.
+
+```mermaid
+flowchart LR
+    HOST["host / DMA<br/>writes each operand once"] -->|"a_we, a_waddr, a_wdata"| AM["A memory<br/>MAXMB x MAXK words of N bytes"]
+    HOST -->|"b_we, b_waddr, b_wdata"| BM["B memory<br/>MAXNB x MAXK words of N bytes"]
+    CTL["tile controller<br/>loops ib, jb, k"] -->|"read address"| AM
+    CTL -->|"read address"| BM
+    AM --> FIFO["2-entry FIFO<br/>hides the 1-cycle read latency"]
+    BM --> FIFO
+    FIFO -->|"one beat per cycle"| SA["sa_top<br/>N x N array"]
+    SA -->|"N rows per tile, tiles in ib, jb order"| OUT["C stream (AXI4-Stream)"]
+    SA -.->|"tile finished"| CTL
+```
+
+* Memory word = one column segment of A (`A_MEM[ib*K + k]`, lane i = `A[ib*N+i][k]`) or one row segment of B
+  (`B_MEM[jb*K + k]`); the host/DMA does this layout change. The job is `cfg_k`, `cfg_mb`, `cfg_nb` plus a `start` pulse.
+* A 2-entry FIFO sits between the 1-cycle-latency memories and `sa_top`. A read is issued only if a slot will be free when
+  the data returns, which gives one beat per cycle during LOAD and lets the next tile's first beats be fetched while the
+  current tile drains and is read out.
+* Cycles with no stalls: `gemm_cycles = tiles * (K + DRAIN + N + 1) + 1`, i.e. `analysis/perf_model.py:tile_cycles` per tile
+  plus a constant; `perf_model.py --validate` checks it against 7 whole-GEMM simulations at each of N = 2, 4, 8 (exact).
+
+**Measured reuse.** For a 16x16 output with K = 16 on a 4x4 array (mb = nb = 4), the memories are loaded with
+512 B once, and the array is fed 2,048 B: **4.00x**, exactly `2*mb*nb/(mb+nb)`. For the layers of the performance
+analysis, the interface bytes per cycle that a 32x32 array needs (output included) fall from 55-64 B/cycle (the unbuffered
+design, essentially its full 2N-byte input rate) towards 9-27 B/cycle with ideal operand reuse:
+
+| Layer | B/cycle `sa_top` | B/cycle ideal reuse | = GB/s at 187.6 MHz |
+|---|---|---|---|
+| conv1 | 55.6 | 26.6 | 10.4 -> 5.0 |
+| conv2_x | 61.0 | 20.1 | 11.4 -> 3.8 |
+| conv3_x | 62.4 | 11.6 | 11.7 -> 2.2 |
+| conv4_x | 63.1 | 9.2 | 11.8 -> 1.7 |
+| conv5_x | 63.6 | 17.8 | 11.9 -> 3.3 |
+| fc | 60.6 | 26.5 | 11.4 -> 5.0 |
+| BERT QKV | 61.6 | 12.2 | 11.6 -> 2.3 |
+
+This is an upper bound. The "ideal" assumes the whole working set is on chip: conv4_x needs about 1.0 MB for A and B, while the
+default `sa_gemm` buffers hold `(MAXMB + MAXNB) * MAXK * N` = 2 KB (K up to 64, 4x4 blocks of N). Real layers would need blocking
+over K and over panels of M and Nc, with loads overlapped with compute (double buffering); none of that is built, and the
+memory is a behavioural model (`sram_sp.sv`, which would be replaced by a macro).
+
+**Verification.**
+* `test_sa_gemm.py` (10 tests): single and multi-tile jobs, M and Nc not multiples of N (the padding must stay zero), exact cycle
+  counts, operand reuse, random back-pressure with output stability, re-run without reloading and a smaller sub-job on the same
+  buffers, a `start` during a job being ignored, reset in the middle of a job, and a coverage matrix over the corners (all bins hit).
+  Passed at N = 2, 4, 8, `PIPE=0`, and five different buffer geometries (including `MAXMB = 1` and `MAXNB = 3`).
+* Formal (`formal/sa_gemm.sby`, k-induction, tiny buffers): the latched configuration is valid; the FIFO never holds more than
+  2 beats including the read in flight; the address pointers equal `ib*K` and `jb*K` so every read is inside the buffers;
+  tile counters stay in range; `done` is exactly the cycle after the last-row handshake; the output is stable under back-pressure;
+  the job configuration is frozen while running.
+* What formal found: the first induction run failed on the FIFO property. The counterexample showed that `rd_pending` was only
+  updated while `run` was set, so if `run` ever dropped with a read in flight the FIFO would keep "pushing". Normal operation never
+  does that, so no simulation could expose it, but the fix (update `rd_pending` every cycle) is a real robustness improvement.
+* Not proven: that the FIFO is empty once the job is done, and that the read side is never behind the output side. Both need a
+  contract about `sa_top`'s internal state (it only outputs after accepting a last beat); the solver kept finding unreachable states
+  without it. They are covered by simulation (exact `beats_fed` counts and cycle counts, re-run tests). One interface assumption is
+  used: the host starts a job only while the result stream is idle.
+* Bug injection: 11 mutations of the controller, all caught. Two are caught *only* by the exact cycle-count test: the "no read-ahead"
+  change (correct data, 2 beats per 3 cycles) and an off-by-one in the cycle counter.
+
+A tooling note from this work: `make` does not track `-P`/`-G` parameter overrides, so a shared build directory silently reused a stale
+build when `QSTAGES` or the buffer size changed. The simulation build directory is now named after every parameter, which also exposed
+that my first "different buffer size" run had not tested what I thought.
+

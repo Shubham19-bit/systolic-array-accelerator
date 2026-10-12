@@ -26,3 +26,7 @@ formal/sa_top_*/
 synth/reports/
 formal/sa_top/
 formal/status.sqlite
+formal/quant_relu/
+formal/quant_relu_*/
+formal/sa_gemm/
+formal/sa_gemm_*/

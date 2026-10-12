@@ -23,7 +23,14 @@ from dataclasses import dataclass
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 COPIED = ("rtl", "tb", "model")
 IGNORE = shutil.ignore_patterns("sim_build*", "results.xml", "__pycache__", "*.fst", "*.vcd")
-SUITES = (("cocotb", "tb/cocotb"), ("pyuvm", "tb/pyuvm"))
+# suite name -> (directory, extra make arguments)
+SUITES = {
+    "cocotb": ("tb/cocotb", []),
+    "pyuvm": ("tb/pyuvm", []),
+    "quant": ("tb/cocotb", ["TOP=quant_relu", "MODULE=test_quant", "QSTAGES=3"]),
+    "layer": ("tb/cocotb", ["TOP=sa_layer", "MODULE=test_sa_layer", "QSTAGES=3"]),
+    "gemm": ("tb/cocotb", ["TOP=sa_gemm", "MODULE=test_sa_gemm"]),
+}
 TIMEOUT_S = 600
 
 
@@ -34,6 +41,7 @@ class Bug:
     old: str
     new: str
     why: str            # what the mutation models / why it is interesting
+    suites: tuple[str, ...] = ("cocotb", "pyuvm")     # test suites that must notice it
 
 
 BUGS = (
@@ -86,6 +94,94 @@ BUGS = (
         "a_out <= a_in;\n            b_out <= b_in;",
         "a_out <= b_in;\n            b_out <= a_in;",
         "dataflow error between neighbouring PEs"),
+    # ---- requantization stage (rtl/quant_relu.sv) and its integration (rtl/sa_layer.sv)
+    Bug("quant: rounding dropped", "rtl/quant_relu.sv",
+        "f[DW:1] + DW'(f[0]);", "f[DW:1];",
+        "truncation instead of round-half-up: off by one on every tie",
+        suites=("quant",)),
+    Bug("quant: round bit inverted", "rtl/quant_relu.sv",
+        "f[DW:1] + DW'(f[0]);", "f[DW:1] + DW'(!f[0]);",
+        "rounds up exactly when it should round down", suites=("quant",)),
+    Bug("quant: logical instead of arithmetic shift", "rtl/quant_relu.sv",
+        "assign zs = z >>> cfg_shift;", "assign zs = z >> cfg_shift;",
+        "negative values turn into large positives and saturate the wrong way",
+        suites=("quant",)),
+    Bug("quant: high saturation threshold off by one", "rtl/quant_relu.sv",
+        "(sh >= SAT_HI)", "(sh > SAT_HI)",
+        "sh = 127 with the round bit set becomes 128 and wraps to -128", suites=("quant",)),
+    Bug("quant: asymmetric low saturation (-127)", "rtl/quant_relu.sv",
+        "f[FW-2] ? {1'b1, {(DW-1){1'b0}}}",
+        "f[FW-2] ? {1'b1, {(DW-2){1'b0}}, 1'b1}",
+        "values below -128 clamp to -127", suites=("quant",)),
+    Bug("quant: sign extension lost", "rtl/quant_relu.sv",
+        "? '0 : {x[AW-1], x};", "? '0 : {1'b0, x};",
+        "negative accumulators are treated as large positives", suites=("quant",)),
+    Bug("quant: ReLU missing", "rtl/quant_relu.sv",
+        "assign xr = (cfg_relu && x[AW-1]) ? '0 : {x[AW-1], x};",
+        "assign xr = {x[AW-1], x};",
+        "negative accumulators pass through", suites=("quant",)),
+    Bug("quant: output register reloads while stalled", "rtl/quant_relu.sv",
+        "end else if (adv) begin\n            m_axis_tvalid <= p2_valid;",
+        "end else begin\n            m_axis_tvalid <= p2_valid;",
+        "output changes / beats are lost under back-pressure", suites=("quant",)),
+    Bug("quant: pipeline register not frozen by a stall", "rtl/quant_relu.sv",
+        "end else if (adv) begin\n                    p1_valid <= s_axis_tvalid;",
+        "end else begin\n                    p1_valid <= s_axis_tvalid;",
+        "a beat inside the pipeline is overwritten while the output is stalled",
+        suites=("quant",)),
+    Bug("quant: tlast dropped", "rtl/quant_relu.sv",
+        "m_axis_tlast <= p2_last;", "m_axis_tlast <= 1'b0;",
+        "AXI4-Stream framing lost", suites=("quant",)),
+    Bug("layer: output back-pressure ignored by the stage", "rtl/sa_layer.sv",
+        ".m_axis_tready(m_axis_tready),\n        .m_axis_tdata(m_axis_tdata),",
+        ".m_axis_tready(1'b1),\n        .m_axis_tdata(m_axis_tdata),",
+        "rows lost when the consumer stalls", suites=("layer",)),
+    Bug("layer: ReLU enable inverted", "rtl/sa_layer.sv",
+        ".cfg_relu(cfg_relu),", ".cfg_relu(!cfg_relu),",
+        "wiring error between configuration and stage", suites=("layer",)),
+    Bug("layer: cfg_shift tied to 0", "rtl/sa_layer.sv",
+        ".cfg_shift(cfg_shift),", ".cfg_shift(5'd0),",
+        "scale ignored: everything saturates", suites=("layer",)),
+    # ---- tiled GEMM controller (rtl/sa_gemm.sv)
+    Bug("gemm: FIFO credit allows 3 entries", "rtl/sa_gemm.sv",
+        "(used < 3'd2 || pop)", "(used < 3'd3 || pop)",
+        "the 2-entry operand FIFO overflows: beats are overwritten", suites=("gemm",)),
+    Bug("gemm: no read-ahead when the FIFO pops", "rtl/sa_gemm.sv",
+        "(used < 3'd2 || pop)", "(used < 3'd2)",
+        "functionally correct but the feed drops to 2 beats per 3 cycles: only the cycle count "
+        "can see it", suites=("gemm",)),
+    Bug("gemm: B read pointer not rewound for the next row block", "rtl/sa_gemm.sv",
+        "                            b_base <= '0;\n                            a_base <= a_base + A_AW'(k_q);",
+        "                            a_base <= a_base + A_AW'(k_q);",
+        "second and later row blocks read the wrong B tiles", suites=("gemm",)),
+    Bug("gemm: A block address off by one", "rtl/sa_gemm.sv",
+        "a_base <= a_base + A_AW'(k_q);", "a_base <= a_base + A_AW'(k_q) + 1'b1;",
+        "row blocks after the first read a shifted slice of A", suites=("gemm",)),
+    Bug("gemm: tlast on every tile", "rtl/sa_gemm.sv",
+        "assign m_axis_tlast  = c_tlast && last_tile && run;", "assign m_axis_tlast  = c_tlast && run;",
+        "result stream is cut into one frame per tile", suites=("gemm",)),
+    Bug("gemm: last tile detected from the row block only", "rtl/sa_gemm.sv",
+        "assign last_tile = (oi == mb_q - MBW'(1)) && (oj == nb_q - NBW'(1));",
+        "assign last_tile = (oi == mb_q - MBW'(1));",
+        "job ends early when there is more than one column block", suites=("gemm",)),
+    Bug("gemm: tile-last flag one beat early", "rtl/sa_gemm.sv",
+        "rd_last_q <= (k == k_q - KW'(1));", "rd_last_q <= (k == k_q - KW'(2));",
+        "sa_top sees tlast one beat too soon", suites=("gemm",)),
+    Bug("gemm: FIFO pop+push mishandled at occupancy 1", "rtl/sa_gemm.sv",
+        "2'b11: begin                                      // pop and push\n"
+        "                    if (occ == 2'd1) begin",
+        "2'b11: begin                                      // pop and push\n"
+        "                    if (occ == 2'd2) begin",
+        "a beat is duplicated and another lost in steady state", suites=("gemm",)),
+    Bug("gemm: start restarts a running job", "rtl/sa_gemm.sv",
+        "if (start && !run) begin", "if (start) begin",
+        "a start pulse while busy corrupts the job", suites=("gemm",)),
+    Bug("gemm: cycle counter off by one", "rtl/sa_gemm.sv",
+        "gemm_cycles <= cyc + 1'b1;", "gemm_cycles <= cyc;",
+        "performance counter wrong", suites=("gemm",)),
+    Bug("gemm: reads continue after the last tile", "rtl/sa_gemm.sv",
+        "assign issue     = run && !issue_done && (used", "assign issue     = run && (used",
+        "extra operand beats are fetched and fed to the array", suites=("gemm",)),
 )
 
 
@@ -97,11 +193,12 @@ def failed_tests(results_xml: str) -> tuple[list[str], int]:
     return failed, len(cases)
 
 
-def run_suite(work: str, rel: str, n: int) -> tuple[str, list[str], int]:
+def run_suite(work: str, name: str, n: int) -> tuple[str, list[str], int]:
     """Returns (status, failing tests, total tests); status in {"ran", "hang", "error"}."""
+    rel, extra = SUITES[name]
     d = os.path.join(work, rel)
     try:
-        subprocess.run(["make", f"N={n}"], cwd=d, capture_output=True, text=True,
+        subprocess.run(["make", f"N={n}", *extra], cwd=d, capture_output=True, text=True,
                        timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
         return "hang", [], 0
@@ -114,7 +211,7 @@ def run_suite(work: str, rel: str, n: int) -> tuple[str, list[str], int]:
 Result = dict[str, tuple[str, list[str], int]]
 
 
-def run_variant(bug: Bug | None, n: int) -> Result:
+def run_variant(bug: Bug | None, n: int, suites: tuple[str, ...]) -> Result:
     with tempfile.TemporaryDirectory(prefix="sa_bug_") as work:
         for d in COPIED:
             shutil.copytree(os.path.join(ROOT, d), os.path.join(work, d), ignore=IGNORE)
@@ -125,7 +222,7 @@ def run_variant(bug: Bug | None, n: int) -> Result:
             assert text.count(bug.old) == 1, f"mutation site not unique/found: {bug.name}"
             with open(path, "w") as f:
                 f.write(text.replace(bug.old, bug.new))
-        return {name: run_suite(work, rel, n) for name, rel in SUITES}
+        return {name: run_suite(work, name, n) for name in suites}
 
 
 def describe(status: tuple[str, list[str], int]) -> str:
@@ -147,41 +244,61 @@ def caught(result: Result) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=4, help="array size to simulate")
-    ap.add_argument("--out", default=os.path.join(ROOT, "docs", "bug_injection.md"))
+    ap.add_argument("--out", default=None,
+                    help="report file (default docs/bug_injection.md; not written with --only)")
+    ap.add_argument("--only", default="",
+                    help="comma-separated suites (e.g. quant,layer): inject only bugs aimed at them")
     args = ap.parse_args()
+    only = [x for x in args.only.split(",") if x]
+    bugs = [b for b in BUGS if not only or set(b.suites) & set(only)]
+    out = args.out or (None if only else os.path.join(ROOT, "docs", "bug_injection.md"))
 
     print(f"Baseline (no bug), N={args.n} ...", flush=True)
-    base = run_variant(None, args.n)
+    base = run_variant(None, args.n, tuple(only) if only else tuple(SUITES))
     if any(kind != "ran" or failed for kind, failed, _ in base.values()):
         print("Baseline FAILED - fix the design/bench first:", base)
         return 1
 
     rows, all_caught = [], True
-    for bug in BUGS:
+    for bug in bugs:
         print(f"Injecting: {bug.name} ...", flush=True)
-        res = run_variant(bug, args.n)
+        res = run_variant(bug, args.n, bug.suites)
         is_caught = caught(res)
         all_caught &= is_caught
         rows.append((bug, res, is_caught))
         print(f"   {'CAUGHT' if is_caught else 'NOT CAUGHT'}  "
-              f"cocotb: {describe(res['cocotb'])} | pyuvm: {describe(res['pyuvm'])}")
+              + " | ".join(f"{name}: {describe(r)}" for name, r in res.items()))
 
     lines = [f"# Bug-injection results (N={args.n})", "",
              "Each row is a one-line RTL mutation applied to a copy of the design. "
-             "'Caught by' lists the failing tests (cocotb | pyuvm). "
-             "Generated by `analysis/bug_injection.py` (`make bugs`).", "",
-             "| # | Injected bug | Why it matters | Caught by (cocotb) | Caught by (pyuvm) |",
-             "|---|---|---|---|---|"]
-    for i, (bug, res, is_caught) in enumerate(rows, 1):
-        flag = "" if is_caught else " **NOT CAUGHT**"
-        lines.append(f"| {i} | {bug.name} (`{bug.file}`) | {bug.why} | "
-                     f"{describe(res['cocotb'])} | {describe(res['pyuvm'])}{flag} |")
+             "'Caught by' lists the failing tests of each suite. "
+             "Generated by `analysis/bug_injection.py` (`make bugs`).", ""]
+    groups = {}
+    for bug, res, is_caught in rows:
+        groups.setdefault(bug.suites, []).append((bug, res, is_caught))
+    titles = {("cocotb", "pyuvm"): "Systolic array (sa_top, pe, skew buffer)",
+              ("quant",): "Requantization stage (quant_relu)",
+              ("layer",): "Layer integration (sa_layer)",
+              ("gemm",): "Tiled GEMM controller (sa_gemm)"}
+    counter = 0
+    for suites, members in groups.items():
+        lines += [f"## {titles.get(suites, ', '.join(suites))}", "",
+                  "| # | Injected bug | Why it matters | " +
+                  " | ".join(f"Caught by ({name})" for name in suites) + " |",
+                  "|---|---|---|" + "---|" * len(suites)]
+        for bug, res, is_caught in members:
+            counter += 1
+            flag = "" if is_caught else " **NOT CAUGHT**"
+            cells = " | ".join(describe(res[name]) for name in suites)
+            lines.append(f"| {counter} | {bug.name} (`{bug.file}`) | {bug.why} | {cells}{flag} |")
+        lines.append("")
     n_caught = sum(c for _, _, c in rows)
-    lines += ["", f"**{n_caught}/{len(rows)} injected bugs caught.**", ""]
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w") as f:
-        f.write("\n".join(lines))
-    print(f"\n{n_caught}/{len(rows)} bugs caught; report written to {args.out}")
+    lines += [f"**{n_caught}/{len(rows)} injected bugs caught.**", ""]
+    if out:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w") as f:
+            f.write("\n".join(lines))
+    print(f"\n{n_caught}/{len(rows)} bugs caught" + (f"; report written to {out}" if out else ""))
     return 0 if all_caught else 1
 
 
