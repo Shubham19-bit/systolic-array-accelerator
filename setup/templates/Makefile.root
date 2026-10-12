@@ -10,13 +10,16 @@
 #   make all        -> everything above
 
 N ?= 4
+# The OSS CAD Suite's Python 3.11: ~/sa-pylibs (numpy, cocotb 1.9.2, ...) is built for it,
+# not for Ubuntu's python3 (3.10).  See CLAUDE.md "Environment".
+PY ?= tabbypy3
 .PHONY: check model test sweep uvm formal synth perf all clean
 
 check:
 	@bash setup/check_tools.sh
 
 model:
-	python3 model/sa_cycle_model.py
+	$(PY) model/sa_cycle_model.py
 
 test:
 	$(MAKE) -C tb/cocotb N=$(N)
@@ -32,11 +35,11 @@ formal:
 
 synth:
 	bash synth/run_synth.sh
-	python3 analysis/summarize_synth.py
+	$(PY) analysis/summarize_synth.py
 
 perf:
-	python3 analysis/perf_model.py
-	python3 analysis/perf_model.py --validate
+	$(PY) analysis/perf_model.py
+	$(PY) analysis/perf_model.py --validate
 
 all: model sweep uvm formal synth perf
 

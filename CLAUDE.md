@@ -11,12 +11,15 @@ it in an interview. Prefer small, reviewable diffs over large rewrites.
 - Windows + **WSL2 Ubuntu**, editing in VS Code (Remote-WSL).
 - Tools from **OSS CAD Suite** (`~/tools/oss-cad-suite/bin`): iverilog, verilator,
   yosys, sby, gtkwave. Optional: OpenSTA (`sta`).
-- Python venv at `./.venv` with **cocotb 1.9.2** and **pyuvm 3.0.0**.
+- Python packages in `~/sa-pylibs` (installed with the OSS CAD Suite's own `tabbypy3`,
+  put on `PYTHONPATH`/`PATH` by `~/.bashrc`): **cocotb 1.9.2** and **pyuvm 3.0.0**.
+  No venv: the suite's `vvp` forces `PYTHONHOME` to the suite's Python 3.11, and the suite
+  also bundles cocotb 2.x, which `~/sa-pylibs` shadows.
   Use cocotb 1.9 APIs (`units="ns"`, `.value.signed_integer`, `Task.kill()`),
   NOT cocotb 2.x APIs, unless we deliberately upgrade.
 - `$LIB` = path to `sky130_fd_sc_hd__tt_025C_1v80.lib` (set by setup script).
 
-## Commands (run from repo root, venv active)
+## Commands (run from repo root)
 | Task | Command |
 |---|---|
 | toolchain check | `make check` |

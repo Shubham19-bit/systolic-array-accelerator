@@ -15,7 +15,7 @@ check() {  # name, command, version-cmd, required(yes/no), purpose
   fi
 }
 echo "Toolchain check:"
-check "python3"    python3   "python3 --version"   yes "everything"
+check "tabbypy3"   tabbypy3  "tabbypy3 --version"  yes "everything (OSS CAD Suite Python)"
 check "make"       make      "make --version"      yes "everything"
 check "iverilog"   iverilog  "iverilog -V"         yes "simulation (default)"
 check "verilator"  verilator "verilator --version" no  "fast simulation, linting"
@@ -26,9 +26,9 @@ check "sta"        sta       "sta -version"        no  "static timing analysis (
 
 echo "Python packages:"
 for p in cocotb pyuvm numpy matplotlib; do
-  v=$(python3 -c "import $p; print(getattr($p,'__version__','?'))" 2>/dev/null) \
+  v=$(tabbypy3 -c "import $p; print(getattr($p,'__version__','?'))" 2>/dev/null) \
     && printf "  [ok]      %-14s %s\n" "$p" "$v" \
-    || printf "  [MISSING] %-14s run: pip install -r requirements.txt\n" "$p"
+    || printf "  [MISSING] %-14s run: bash setup/install_tools.sh (installs into ~/sa-pylibs)\n" "$p"
 done
 
 if [[ -n "${LIB:-}" && -f "$LIB" ]]; then

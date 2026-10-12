@@ -66,7 +66,7 @@ setup/          install_tools.sh, check_tools.sh
 
 ```bash
 bash setup/install_tools.sh          # one time
-source ~/.bashrc && source .venv/bin/activate
+source ~/.bashrc
 make check                           # confirm the toolchain
 make model                           # cycle-model self-test (numpy only)
 make test                            # cocotb regression, N=4

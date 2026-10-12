@@ -36,7 +36,6 @@ The script first runs `setup/place_templates.sh`, which copies the Makefiles and
 ```bash
 bash setup/install_tools.sh
 source ~/.bashrc
-source .venv/bin/activate
 make check
 ```
 
@@ -44,7 +43,8 @@ make check
 1. Install VS Code on Windows + the **WSL** extension.
 2. In Ubuntu: `cd ~/projects/systolic-array-accelerator && code .`
 3. Accept the recommended extensions (TerosHDL, Verilog-HDL, Python, WaveTrace, GitLens).
-4. Select the interpreter `./.venv/bin/python` (Ctrl+Shift+P → *Python: Select Interpreter*).
+4. Optional (editor IntelliSense only): add `~/sa-pylibs` to `python.analysis.extraPaths`.
+   There is no `.venv`; the simulator uses the OSS CAD Suite's Python (see `CLAUDE.md`).
 
 ### 0.5 Install Claude Code (in WSL)
 Follow the official Claude Code install instructions, then run `claude` in the project

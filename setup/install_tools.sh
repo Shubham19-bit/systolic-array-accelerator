@@ -7,7 +7,7 @@
 # Installs:
 #   * OSS CAD Suite  -> Icarus Verilog, Verilator, Yosys, SymbiYosys, GTKWave, ...
 #                       (into ~/tools/oss-cad-suite, added to ~/.bashrc)
-#   * Python venv    -> cocotb, pyuvm, numpy, matplotlib (into ./.venv)
+#   * Python packages -> cocotb, pyuvm, numpy, matplotlib (into ~/sa-pylibs, suite Python)
 #   * sky130 HD standard-cell liberty file (for real area/timing, week 3)
 # OpenSTA is optional and covered in PATHWAY.md (week 3).
 # -----------------------------------------------------------------------------
@@ -48,14 +48,21 @@ export PATH="$TOOLS/oss-cad-suite/bin:$PATH"
 
 echo ">>> [3/4] Python virtual environment + packages"
 cd "$ROOT"
-python3 -m venv .venv
-# shellcheck disable=SC1091
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-if ! grep -q "systolic-array-accelerator/.venv" "$HOME/.bashrc"; then
-  echo "# activate the project venv with:  source $ROOT/.venv/bin/activate" >> "$HOME/.bashrc"
+# No venv: oss-cad-suite/bin/vvp is a wrapper that forces PYTHONHOME to the suite, so the
+# simulator embeds the SUITE's Python 3.11 (a venv on Ubuntu's 3.10 dies with
+# "No module named 'encodings'", and the suite's Python cannot create a venv).
+# The suite bundles cocotb 2.x but this project uses 1.9 APIs, so install the pinned
+# packages into a private folder and let PYTHONPATH shadow the bundled cocotb.
+PYLIBS="$HOME/sa-pylibs"
+"$TOOLS/oss-cad-suite/bin/tabbypy3" -m pip install --target "$PYLIBS" -r requirements.txt
+if ! grep -q "sa-pylibs" "$HOME/.bashrc"; then
+  {
+    echo 'export PYTHONPATH="$HOME/sa-pylibs:$PYTHONPATH"'
+    echo 'export PATH="$HOME/sa-pylibs/bin:$PATH"'
+  } >> "$HOME/.bashrc"
 fi
+export PYTHONPATH="$PYLIBS:${PYTHONPATH:-}"
+export PATH="$PYLIBS/bin:$PATH"
 
 echo ">>> [4/4] sky130 HD liberty (typical corner)"
 mkdir -p "$TOOLS/sky130"
@@ -71,4 +78,4 @@ fi
 
 echo
 echo "Done. Open a NEW terminal (or run 'source ~/.bashrc'), then:"
-echo "  cd $ROOT && source .venv/bin/activate && make check"
+echo "  cd $ROOT && make check"
